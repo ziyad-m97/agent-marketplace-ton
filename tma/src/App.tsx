@@ -6,7 +6,8 @@ import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import './index.css';
 
-const MANIFEST_URL = 'https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main/tma/tonconnect-manifest.json';
+// In production, this should be the deployed URL. For dev with ngrok, update accordingly.
+const MANIFEST_URL = 'https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main/tma/public/tonconnect-manifest.json';
 
 function App() {
   return (
