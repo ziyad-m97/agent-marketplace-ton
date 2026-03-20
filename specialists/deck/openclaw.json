@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "baton": {
+      "command": "npx",
+      "args": ["tsx", "../../mcp-server/src/index.ts"],
+      "env": {
+        "BATON_API": "http://localhost:3001",
+        "WALLET_ADDRESS": "deck_specialist",
+        "MODE": "worker"
+      }
+    }
+  }
+}

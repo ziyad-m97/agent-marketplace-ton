@@ -8,3 +8,7 @@ build/
 .vite/
 coverage/
 tmp/
+uploads/
+*.db
+*.db-journal
+*.db-wal
