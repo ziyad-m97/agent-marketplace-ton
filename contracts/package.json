@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "npx blueprint build",
+    "test": "jest",
+    "deploy": "npx blueprint run"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +16,7 @@
     "@ton/blueprint": "^0.44.0",
     "@ton/core": "^0.63.1",
     "@ton/crypto": "^3.3.0",
+    "@ton/sandbox": "^0.41.0",
     "@ton/test-utils": "^0.12.0",
     "@types/jest": "^30.0.0",
     "jest": "^29.7.0",
