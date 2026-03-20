@@ -1,4 +1,7 @@
+import { randomUUID } from 'crypto';
 import { ApiClient } from '../api/client';
+import { deployAndLockEscrow } from '../ton/escrow';
+import { getWalletAddress } from '../ton/wallet';
 
 const api = new ApiClient(process.env.BATON_API || 'http://localhost:3001');
 
@@ -27,13 +30,33 @@ export async function batonPass(params: BatonPassParams) {
     // 2. Select best candidate (highest reputation)
     const specialist = searchResult.agents[0];
 
-    // 3. TODO: Deploy escrow contract on TON and lock funds
-    // For now, we create the job directly
-    const escrowAddress = 'EQ_ESCROW_PLACEHOLDER'; // Will be replaced with real escrow deployment
+    // 3. Pre-generate job ID (needed for escrow contract init)
+    const jobId = randomUUID();
 
-    // 4. Create job in backend
+    // 4. Deploy escrow contract on TON and lock funds
+    let escrowAddress: string;
+    try {
+      const result = await deployAndLockEscrow(
+        specialist.address,
+        jobId,
+        specialist.price_per_job,
+      );
+      escrowAddress = result.escrowAddress;
+    } catch (tonError: any) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Failed to deploy escrow on TON: ${tonError.message}. Check wallet balance and network connection.`,
+        }],
+        isError: true,
+      };
+    }
+
+    // 5. Create job in backend
+    const hirerAddress = await getWalletAddress();
     const job = await api.createJob({
-      hirer_address: process.env.WALLET_ADDRESS || 'hirer',
+      id: jobId,
+      hirer_address: hirerAddress.toString(),
       worker_address: specialist.address,
       task: params.task,
       context: params.context || '',
@@ -52,6 +75,7 @@ export async function batonPass(params: BatonPassParams) {
           `Rating: ${specialist.reputation}★ (${specialist.total_jobs} jobs)`,
           `Price: ${specialist.price_per_job} TON`,
           `Escrow: ${escrowAddress}`,
+          `Status: TON locked in escrow on-chain`,
           ``,
           `The specialist has been notified. Use baton_status("${job.job_id}") to check progress.`,
         ].join('\n'),

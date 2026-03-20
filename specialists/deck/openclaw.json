@@ -5,7 +5,9 @@
       "args": ["tsx", "../../mcp-server/src/index.ts"],
       "env": {
         "BATON_API": "http://localhost:3001",
-        "WALLET_ADDRESS": "deck_specialist",
+        "WALLET_MNEMONIC": "<REPLACE_WITH_SPECIALIST_MNEMONIC>",
+        "TONCENTER_API_KEY": "<REPLACE_WITH_API_KEY>",
+        "TON_NETWORK": "testnet",
         "MODE": "worker"
       }
     }

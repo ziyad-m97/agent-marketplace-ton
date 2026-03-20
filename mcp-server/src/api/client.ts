@@ -45,6 +45,7 @@ export class ApiClient {
   // === Jobs ===
 
   async createJob(data: {
+    id?: string;
     hirer_address: string;
     worker_address: string;
     task: string;

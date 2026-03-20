@@ -30,8 +30,8 @@ jobsRouter.post('/search', (req: Request, res: Response) => {
 
 // Create a new job
 jobsRouter.post('/create', (req: Request, res: Response) => {
-  const { hirer_address, worker_address, task, context, escrow_address, amount } = req.body;
-  const id = uuid();
+  const { id: providedId, hirer_address, worker_address, task, context, escrow_address, amount } = req.body;
+  const id = providedId || uuid();
   const db = getDb();
 
   db.prepare(`

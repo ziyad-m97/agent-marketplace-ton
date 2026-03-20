@@ -1,4 +1,5 @@
 import { ApiClient } from '../api/client';
+import { getWalletAddress } from '../ton/wallet';
 
 const api = new ApiClient(process.env.BATON_API || 'http://localhost:3001');
 
@@ -8,7 +9,8 @@ interface BatonAcceptParams {
 
 export async function batonAccept(params: BatonAcceptParams) {
   try {
-    const workerAddress = process.env.WALLET_ADDRESS || 'worker';
+    const walletAddress = await getWalletAddress();
+    const workerAddress = walletAddress.toString();
     await api.acceptJob(params.job_id, workerAddress);
 
     // Get full job details
@@ -27,7 +29,7 @@ export async function batonAccept(params: BatonAcceptParams) {
           ``,
           `Task: ${job.task}`,
           `Context: ${job.context || 'none'}`,
-          `Payment: ${job.amount} TON (in escrow)`,
+          `Payment: ${job.amount} TON (locked in escrow at ${job.escrow_address})`,
           ``,
           `Attachments:`,
           attachments,

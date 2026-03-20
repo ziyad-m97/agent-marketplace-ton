@@ -1,10 +1,12 @@
 import { ApiClient } from '../api/client';
+import { getWalletAddress } from '../ton/wallet';
 
 const api = new ApiClient(process.env.BATON_API || 'http://localhost:3001');
 
 export async function batonListen() {
   try {
-    const workerAddress = process.env.WALLET_ADDRESS || 'worker';
+    const walletAddress = await getWalletAddress();
+    const workerAddress = walletAddress.toString();
     const result = await api.getJobs({ worker: workerAddress, status: 'created' });
 
     if (!result.jobs || result.jobs.length === 0) {
