@@ -1,8 +1,12 @@
 /**
  * Baton Protocol plugin for OpenClaw.
  *
- * Rich Telegram UX: inline rating buttons, progress messages, wallet link.
- * Uses Telegram Bot API directly for reliable button delivery.
+ * UX rules:
+ * - Plugin sends "Delegating..." message with Cancel button (from baton_pass)
+ * - Plugin sends rating buttons 4s after delivery (from baton_status)
+ * - Plugin handles button callbacks (rating + wallet)
+ * - Agent ONLY sends the deliverable file + one short sentence
+ * - No job IDs, prices, or specialist details shown to user
  */
 
 import { writeFileSync } from "fs";
@@ -25,8 +29,6 @@ async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<
   return res.json();
 }
 
-// Extract Telegram chat ID from OpenClaw session key
-// Format: "agent:<id>:telegram:dm:<chatId>" or "agent:<id>:telegram:group:<chatId>"
 function parseChatId(sessionKey?: string): string | null {
   if (!sessionKey) return null;
   const parts = sessionKey.split(":");
@@ -35,66 +37,34 @@ function parseChatId(sessionKey?: string): string | null {
   return null;
 }
 
-// Send message via Telegram Bot API directly (reliable, supports buttons)
 async function tgSend(botToken: string, chatId: string, text: string, buttons?: any[][]) {
   const body: any = { chat_id: chatId, text, parse_mode: "HTML" };
-  if (buttons?.length) {
-    body.reply_markup = { inline_keyboard: buttons };
-  }
+  if (buttons?.length) body.reply_markup = { inline_keyboard: buttons };
   try {
-    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const data = await res.json();
-    if (!data.ok) console.log("[baton] tgSend error:", data.description);
-    return data;
   } catch (err: any) {
     console.log("[baton] tgSend failed:", err.message);
   }
 }
 
-// Send file via Telegram Bot API
-async function tgSendFile(botToken: string, chatId: string, filePath: string, caption?: string) {
-  const { createReadStream } = await import("fs");
-  const FormData = (await import("node:buffer")).Blob ? globalThis.FormData : null;
-  // Use fetch with form data
-  try {
-    const fileBuffer = await import("fs").then(fs => fs.readFileSync(filePath));
-    const filename = filePath.split("/").pop() || "file";
-    const blob = new Blob([fileBuffer]);
-    const form = new FormData();
-    form.append("chat_id", chatId);
-    form.append("document", blob, filename);
-    if (caption) form.append("caption", caption);
-    if (caption) form.append("parse_mode", "HTML");
-    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
-      method: "POST",
-      body: form as any,
-    });
-    const data = await res.json();
-    if (!data.ok) console.log("[baton] tgSendFile error:", data.description);
-    return data;
-  } catch (err: any) {
-    console.log("[baton] tgSendFile failed:", err.message);
-  }
-}
-
-// Set the Telegram bot's menu button to open the Baton TMA
 async function setupTelegramMenuButton(botToken: string) {
   try {
-    const res = await fetch(`https://api.telegram.org/bot${botToken}/setChatMenuButton`, {
+    await fetch(`https://api.telegram.org/bot${botToken}/setChatMenuButton`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         menu_button: { type: "web_app", text: "Baton Account", web_app: { url: TMA_URL } },
       }),
     });
-    const data = await res.json();
-    if (data.ok) console.log("[baton] Menu button set →", TMA_URL);
   } catch {}
 }
+
+// Track active jobs for cancel support
+const activeJobs = new Map<string, string>(); // jobId → status
 
 export default function (api: any) {
   const botToken = api.config?.channels?.telegram?.botToken;
@@ -103,17 +73,13 @@ export default function (api: any) {
   // --- baton_pass ---
   api.registerTool((ctx: any) => ({
     name: "baton_pass",
-    description:
-      "Delegate a task to a specialist. Finds the best match, locks TON in escrow, submits the job. Returns job_id for polling.",
+    description: "Delegate a task to a specialist. Say NOTHING to the user — the plugin sends a message.",
     parameters: {
       type: "object",
       properties: {
         task: { type: "string", description: "Short task description" },
         context: { type: "string", description: "Detailed requirements" },
-        required_skills: {
-          type: "array", items: { type: "string" },
-          description: 'e.g. ["3d-rendering"]',
-        },
+        required_skills: { type: "array", items: { type: "string" }, description: 'e.g. ["3d-rendering"]' },
         max_budget: { type: "number", description: "Max TON budget" },
       },
       required: ["task"],
@@ -128,12 +94,12 @@ export default function (api: any) {
         });
 
         if (!searchResult.agents?.length) {
-          return { content: [{ type: "text", text: `No specialists found for "${skill || "any"}".` }] };
+          return { content: [{ type: "text", text: "No specialists available right now." }] };
         }
 
         const specialist = searchResult.agents[0];
         const jobId = crypto.randomUUID();
-        const job = await apiRequest("/jobs/create", {
+        await apiRequest("/jobs/create", {
           method: "POST",
           body: JSON.stringify({
             id: jobId,
@@ -146,21 +112,24 @@ export default function (api: any) {
           }),
         });
 
-        // Rich Telegram message
+        activeJobs.set(jobId, "created");
+
+        // Send "Delegating..." with Cancel button — this arrives BEFORE agent response
         if (chatId && botToken) {
           await tgSend(botToken, chatId,
-            `🔄 <b>Specialist found</b> — ${specialist.price_per_job} TON\nWorking on: <i>${params.task}</i>`
+            `🔄 Delegating to a specialist...`,
+            [[{ text: "✕ Cancel", callback_data: `bc:${jobId}` }]]
           );
         }
 
         return {
           content: [{
             type: "text",
-            text: `Job created: ${job.job_id}\nSpecialist: ${specialist.address}\nPrice: ${specialist.price_per_job} TON\n\nNow poll baton_status("${job.job_id}") every 10s until delivered. Do NOT wait for the user.`,
+            text: `[internal] job_id=${jobId}\nSay NOTHING to the user. Start polling baton_status("${jobId}") every 10s immediately.`,
           }],
         };
       } catch (err: any) {
-        return { content: [{ type: "text", text: `Baton pass failed: ${err.message}` }], isError: true };
+        return { content: [{ type: "text", text: `Delegation failed: ${err.message}` }], isError: true };
       }
     },
   }));
@@ -168,7 +137,7 @@ export default function (api: any) {
   // --- baton_status ---
   api.registerTool((ctx: any) => ({
     name: "baton_status",
-    description: "Check job status. Poll every 10s until delivered. When delivered, download the file immediately and send it.",
+    description: "Check job status. When delivered, files are auto-downloaded. Send file to user with one short sentence. Say nothing else.",
     parameters: {
       type: "object",
       properties: {
@@ -179,11 +148,18 @@ export default function (api: any) {
     async execute(_id: string, params: any) {
       const chatId = parseChatId(ctx.sessionKey);
       try {
+        // Check if cancelled
+        if (activeJobs.get(params.job_id) === "cancelled") {
+          return { content: [{ type: "text", text: "Job was cancelled. Stop polling." }] };
+        }
+
         const { job, files } = await apiRequest(`/jobs/${params.job_id}`);
 
-        // When delivered: send file + rating buttons
-        if (job.status === "delivered" && chatId && botToken) {
-          // Download and send file directly to Telegram
+        if (job.status === "delivered") {
+          activeJobs.set(params.job_id, "delivered");
+
+          // Download files to workspace
+          const downloadedFiles: string[] = [];
           if (files?.length) {
             for (const f of files) {
               try {
@@ -192,63 +168,53 @@ export default function (api: any) {
                   const buffer = Buffer.from(await fileRes.arrayBuffer());
                   const outputPath = resolve(WORKSPACE, f.filename);
                   writeFileSync(outputPath, buffer);
-                  await tgSendFile(botToken, chatId, outputPath,
-                    `📦 <b>${f.filename}</b> — ${(buffer.length / 1024 / 1024).toFixed(1)} MB`
-                  );
+                  downloadedFiles.push(outputPath);
                 }
               } catch {}
             }
           }
 
-          // Rating buttons
-          await tgSend(botToken, chatId,
-            `✅ <b>Delivered!</b> Rate to release ${job.amount} TON:`,
-            [
-              [
-                { text: "1 ⭐", callback_data: `br:${job.id}:1` },
-                { text: "2 ⭐", callback_data: `br:${job.id}:2` },
-                { text: "3 ⭐", callback_data: `br:${job.id}:3` },
-                { text: "4 ⭐", callback_data: `br:${job.id}:4` },
-                { text: "5 ⭐", callback_data: `br:${job.id}:5` },
-              ],
-              [
-                { text: "💰 My Account", callback_data: "bw" },
-              ],
-            ]
-          );
+          // Rating buttons arrive 4s after agent's response
+          if (chatId && botToken) {
+            setTimeout(() => {
+              tgSend(botToken, chatId, `Rate:`, [
+                [
+                  { text: "⭐ 1", callback_data: `br:${job.id}:1` },
+                  { text: "⭐ 2", callback_data: `br:${job.id}:2` },
+                  { text: "⭐ 3", callback_data: `br:${job.id}:3` },
+                  { text: "⭐ 4", callback_data: `br:${job.id}:4` },
+                  { text: "⭐ 5", callback_data: `br:${job.id}:5` },
+                ],
+                [{ text: "💰 My Account", callback_data: "bw" }],
+              ]);
+            }, 4000);
+          }
 
-          const fileList = files?.map((f: any) => `${f.filename} (${f.id})`).join(", ") || "none";
           return {
             content: [{
               type: "text",
-              text: `DELIVERED. Files sent to user. Rating buttons shown.\nFiles: ${fileList}\nDo NOT ask the user to rate — the buttons handle it. Move on.`,
+              text: `DELIVERED. Files: ${downloadedFiles.join(", ")}\nSend the file to the user. Say ONE short sentence like "Here's your Einstein bust!" — nothing else. No job ID. No price. No details. No rating prompt.`,
             }],
           };
         }
 
-        const statusLabels: Record<string, string> = {
-          created: "waiting",
-          accepted: "working",
-          delivered: "delivered",
-          confirmed: "completed",
-        };
-
+        // Still in progress
         return {
           content: [{
             type: "text",
-            text: `Status: ${statusLabels[job.status] || job.status}. ${job.status === "accepted" || job.status === "created" ? "Poll again in 10s." : ""}`,
+            text: `Status: ${job.status}. Poll again in 10s. Say NOTHING to the user.`,
           }],
         };
       } catch (err: any) {
-        return { content: [{ type: "text", text: `Status check failed: ${err.message}` }], isError: true };
+        return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
       }
     },
   }));
 
-  // --- baton_rate ---
-  api.registerTool((ctx: any) => ({
+  // --- baton_rate (fallback if buttons don't work) ---
+  api.registerTool({
     name: "baton_rate",
-    description: "Rate specialist and release escrow payment.",
+    description: "Rate specialist and release escrow. Usually handled by buttons automatically.",
     parameters: {
       type: "object",
       properties: {
@@ -258,32 +224,23 @@ export default function (api: any) {
       required: ["job_id", "rating"],
     },
     async execute(_id: string, params: any) {
-      const chatId = parseChatId(ctx.sessionKey);
       try {
         await apiRequest(`/jobs/${params.job_id}/confirm`, { method: "PATCH" });
         await apiRequest(`/jobs/${params.job_id}/rate`, {
           method: "POST",
           body: JSON.stringify({ rating: params.rating }),
         });
-
-        if (chatId && botToken) {
-          await tgSend(botToken, chatId,
-            `💸 <b>${params.rating}★ — Paid!</b> Escrow released.`,
-            [[{ text: "💰 My Account", callback_data: "bw" }]]
-          );
-        }
-
-        return { content: [{ type: "text", text: `Rated ${params.rating}★. Escrow released.` }] };
+        return { content: [{ type: "text", text: "Done." }] };
       } catch (err: any) {
-        return { content: [{ type: "text", text: `Rating failed: ${err.message}` }], isError: true };
+        return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
       }
     },
-  }));
+  });
 
-  // --- baton_download (kept as fallback) ---
+  // --- baton_download (fallback) ---
   api.registerTool({
     name: "baton_download",
-    description: "Download a deliverable file to workspace. Usually baton_status handles this automatically.",
+    description: "Download deliverable file. Usually baton_status does this automatically.",
     parameters: {
       type: "object",
       properties: {
@@ -300,11 +257,9 @@ export default function (api: any) {
         const filename = params.filename || `baton_file_${params.file_id}`;
         const outputPath = resolve(WORKSPACE, filename);
         writeFileSync(outputPath, buffer);
-        return {
-          content: [{ type: "text", text: `Downloaded: ${outputPath} (${(buffer.length / 1024 / 1024).toFixed(1)} MB)` }],
-        };
+        return { content: [{ type: "text", text: outputPath }] };
       } catch (err: any) {
-        return { content: [{ type: "text", text: `Download failed: ${err.message}` }], isError: true };
+        return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
       }
     },
   });
@@ -314,12 +269,13 @@ export default function (api: any) {
     api.registerHook("message:inbound", async (event: any) => {
       const text = event?.message?.text || "";
       const chatId = parseChatId(event?.sessionKey);
+      if (!chatId) return;
 
-      // Rating button: "callback_data: br:<jobId>:<rating>"
+      // Rating: "callback_data: br:<jobId>:<rating>"
       if (text.startsWith("callback_data: br:")) {
         const [, jobId, ratingStr] = text.replace("callback_data: ", "").split(":");
         const rating = parseInt(ratingStr, 10);
-        if (jobId && rating >= 1 && rating <= 5 && chatId) {
+        if (jobId && rating >= 1 && rating <= 5) {
           try {
             await apiRequest(`/jobs/${jobId}/confirm`, { method: "PATCH" });
             await apiRequest(`/jobs/${jobId}/rate`, {
@@ -327,21 +283,27 @@ export default function (api: any) {
               body: JSON.stringify({ rating }),
             });
             await tgSend(botToken, chatId,
-              `💸 <b>${rating}★ — Paid!</b> Escrow released.`,
+              `✅ ${rating}★ — Specialist paid.`,
               [[{ text: "💰 My Account", callback_data: "bw" }]]
             );
           } catch (err: any) {
-            await tgSend(botToken, chatId, `❌ Rating failed: ${err.message}`);
+            await tgSend(botToken, chatId, `❌ ${err.message}`);
           }
           return { handled: true };
         }
       }
 
-      // Wallet button
-      if (text === "callback_data: bw" && chatId) {
-        await tgSend(botToken, chatId,
-          `💰 Tap <b>Baton Account</b> in the menu below ↙️\nOr open: ${TMA_URL}`
-        );
+      // Cancel: "callback_data: bc:<jobId>"
+      if (text.startsWith("callback_data: bc:")) {
+        const jobId = text.replace("callback_data: bc:", "");
+        activeJobs.set(jobId, "cancelled");
+        await tgSend(botToken, chatId, `Cancelled.`);
+        return { handled: true };
+      }
+
+      // Wallet
+      if (text === "callback_data: bw") {
+        await tgSend(botToken, chatId, `Tap <b>Baton Account</b> in the menu ↙️`);
         return { handled: true };
       }
     });
