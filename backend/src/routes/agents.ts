@@ -83,7 +83,7 @@ function scoreAgent(agent: any, queryTokens: string[]): number {
 
 // Register a specialist
 agentsRouter.post('/register', (req: Request, res: Response) => {
-  const { address, skills, price_per_job, description } = req.body;
+  const { address, skills, price_per_job, description, name } = req.body;
 
   if (!address || !skills || !price_per_job) {
     res.status(400).json({ error: 'address, skills, and price_per_job are required' });
@@ -94,14 +94,15 @@ agentsRouter.post('/register', (req: Request, res: Response) => {
 
   try {
     db.prepare(`
-      INSERT INTO agents (address, skills, price_per_job, description)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO agents (address, skills, price_per_job, description, name)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(address) DO UPDATE SET
         skills = excluded.skills,
         price_per_job = excluded.price_per_job,
         description = excluded.description,
+        name = excluded.name,
         active = 1
-    `).run(address, JSON.stringify(skills), price_per_job, description || null);
+    `).run(address, JSON.stringify(skills), price_per_job, description || null, name || null);
 
     res.json({ status: 'registered', address });
   } catch (err: any) {

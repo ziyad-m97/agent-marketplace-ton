@@ -22,7 +22,9 @@ export function Wallet() {
   const address = useTonAddress();
   const { open } = useTonConnectModal();
   const [balance, setBalance] = useState<string | null>(null);
+  const [initialBalance, setInitialBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const fetchBalance = useCallback(async () => {
     if (!wallet || !address) {
@@ -35,6 +37,16 @@ export function Wallet() {
       const isTestnet = wallet.account.chain === CHAIN.TESTNET;
       const bal = await fetchTonBalance(address, isTestnet);
       setBalance(bal);
+
+      // Store the initial balance on first fetch for this wallet
+      const stored = localStorage.getItem(`baton_initial_balance_${address}`);
+      const currentNum = parseFloat(bal);
+      if (stored) {
+        setInitialBalance(parseFloat(stored));
+      } else if (!isNaN(currentNum) && currentNum > 0) {
+        localStorage.setItem(`baton_initial_balance_${address}`, bal);
+        setInitialBalance(currentNum);
+      }
     } catch (err) {
       console.error('Failed to fetch balance:', err);
       setBalance('—');
@@ -58,6 +70,26 @@ export function Wallet() {
     if (val === null || val === '—') return val ?? '0.00';
     const num = parseFloat(val);
     return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  };
+
+  // Calculate usage percentage
+  const currentNum = balance && balance !== '—' ? parseFloat(balance) : null;
+  const spent = initialBalance !== null && currentNum !== null
+    ? Math.max(0, initialBalance - currentNum)
+    : 0;
+  const usagePercent = initialBalance && initialBalance > 0
+    ? Math.min(100, (spent / initialBalance) * 100)
+    : 0;
+
+  const resetInitialBalance = () => {
+    if (!address) return;
+    localStorage.removeItem(`baton_initial_balance_${address}`);
+    if (currentNum !== null && currentNum > 0) {
+      localStorage.setItem(`baton_initial_balance_${address}`, String(currentNum));
+      setInitialBalance(currentNum);
+    } else {
+      setInitialBalance(null);
+    }
   };
 
   // Not connected — show centered connect prompt
@@ -175,6 +207,74 @@ export function Wallet() {
           </div>
         </div>
 
+        {/* Agent Spending Bar */}
+        {initialBalance !== null && initialBalance > 0 && (
+          <div style={{
+            background: 'var(--surface-container)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            padding: 20,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 18, color: 'var(--tertiary)' }}>smart_toy</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--on-surface)' }}>Agent Spending</span>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: usagePercent > 75 ? 'var(--danger)' : usagePercent > 50 ? 'var(--warning)' : 'var(--primary)' }}>
+                {usagePercent.toFixed(1)}%
+              </span>
+            </div>
+
+            {/* Progress bar */}
+            <div style={{
+              width: '100%',
+              height: 10,
+              borderRadius: 5,
+              background: 'var(--surface-container-highest)',
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                width: `${usagePercent}%`,
+                height: '100%',
+                borderRadius: 5,
+                background: usagePercent > 75
+                  ? 'linear-gradient(90deg, var(--warning), var(--danger))'
+                  : usagePercent > 50
+                    ? 'linear-gradient(90deg, var(--primary), var(--warning))'
+                    : 'linear-gradient(90deg, var(--primary), var(--primary-container))',
+                transition: 'width 0.6s ease',
+              }} />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+              <span style={{ fontSize: 11, color: 'var(--on-surface-variant)' }}>
+                {spent.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} TON spent
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--on-surface-variant)' }}>
+                of {initialBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} TON
+              </span>
+            </div>
+
+            <button
+              onClick={resetInitialBalance}
+              style={{
+                marginTop: 12,
+                background: 'none',
+                border: 'none',
+                color: 'var(--primary)',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
+                padding: 0,
+              }}
+            >
+              Reset baseline
+            </button>
+          </div>
+        )}
+
         {/* Network Info */}
         <div className="stats-grid">
           <div className="stat-card">
@@ -207,6 +307,53 @@ export function Wallet() {
           <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>refresh</span>
           {loading ? 'Refreshing...' : 'Refresh Balance'}
         </button>
+
+        {/* Deposit Section */}
+        <div style={{
+          background: 'var(--surface-container)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: 'var(--radius-lg)',
+          padding: 20,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            <span className="material-symbols-outlined" style={{ fontSize: 20, color: 'var(--tertiary)' }}>add_circle</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--on-surface)' }}>Deposit TON</span>
+          </div>
+
+          {wallet.account.chain === CHAIN.TESTNET && (
+            <a
+              href="https://t.me/testgiver_ton_bot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', marginBottom: 12 }}
+            >
+              <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>water_drop</span>
+              Get Free Testnet TON
+            </a>
+          )}
+
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              navigator.clipboard.writeText(address).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              });
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>
+              {copied ? 'check' : 'content_copy'}
+            </span>
+            {copied ? 'Address Copied!' : 'Copy Wallet Address'}
+          </button>
+
+          <p style={{ fontSize: 11, color: 'var(--on-surface-variant)', marginTop: 12, lineHeight: 1.5, textAlign: 'center' }}>
+            {wallet.account.chain === CHAIN.TESTNET
+              ? 'Send the copied address to @testgiver_ton_bot on Telegram to receive free testnet TON.'
+              : 'Send TON to your wallet address from any exchange or wallet.'}
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -26,7 +26,8 @@ export function initDb(): void {
       total_disputes INTEGER DEFAULT 0,
       active INTEGER DEFAULT 1,
       registered_at TEXT DEFAULT (datetime('now')),
-      description TEXT
+      description TEXT,
+      name TEXT
     );
 
     CREATE TABLE IF NOT EXISTS jobs (
@@ -54,6 +55,13 @@ export function initDb(): void {
       FOREIGN KEY (job_id) REFERENCES jobs(id)
     );
   `);
+
+  // Migrate: add name column if missing (for existing databases)
+  const columns = db.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
+  if (!columns.some(c => c.name === 'name')) {
+    db.exec("ALTER TABLE agents ADD COLUMN name TEXT");
+    console.log('Migrated: added name column to agents');
+  }
 
   console.log('Database initialized');
 }
