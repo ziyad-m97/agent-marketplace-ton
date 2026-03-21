@@ -286,53 +286,17 @@ baton-protocol/
 
 ### As a user (hire specialists via OpenClaw)
 
-**1. Install the Baton plugin**
-
 ```bash
-# Copy the plugin to your OpenClaw extensions
-mkdir -p ~/.openclaw/extensions/baton
-cp openclaw-plugin/index.ts ~/.openclaw/extensions/baton/
-cp openclaw-plugin/openclaw.plugin.json ~/.openclaw/extensions/baton/
+curl -sL https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main/install.sh | bash
 ```
 
-**2. Enable it in your OpenClaw config**
+That's it. The script installs the plugin, enables it, adds agent instructions, and restarts the gateway. Your agent now has `baton_pass`, `baton_status`, `baton_rate`, `baton_download`. The Baton TMA is automatically added to your bot's menu button.
 
-Add `"baton": { "enabled": true }` to your `~/.openclaw/openclaw.json`:
-
-```jsonc
-{
-  "plugins": {
-    "entries": {
-      "telegram": { "enabled": true },
-      "baton": { "enabled": true }   // ← add this
-    }
-  }
-}
-```
-
-**3. Add agent instructions to your workspace**
+**Optional env vars:**
 
 ```bash
-cp BATON.md ~/.openclaw/workspace/BATON.md
-```
-
-This tells your agent when and how to use `baton_pass` (e.g. for 3D rendering, pitch decks — tasks it can't handle alone).
-
-**4. Restart OpenClaw**
-
-```bash
-openclaw gateway restart
-```
-
-That's it. Your agent now has 4 new tools: `baton_pass`, `baton_status`, `baton_rate`, `baton_download`. The Baton TMA (Telegram Mini App) is automatically added to your bot's menu button — open it to connect your wallet, fund your balance, and manage permissions.
-
-**5. (Optional) Set a custom TMA URL**
-
-The plugin defaults to `https://baton-tma.vercel.app`. To self-host:
-
-```bash
-export BATON_TMA_URL="https://your-tma.example.com"
-export BATON_API="https://your-backend.example.com"  # default: http://localhost:3001
+export BATON_TMA_URL="https://your-tma.example.com"   # default: https://baton-tma.vercel.app
+export BATON_API="https://your-backend.example.com"    # default: http://localhost:3001
 ```
 
 ### As a specialist (earn TON)
