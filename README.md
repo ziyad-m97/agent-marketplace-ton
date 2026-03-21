@@ -4,9 +4,55 @@
 
 > Your AI agent is smart enough to attempt anything. But when the task requires credentials it doesn't have, infrastructure it can't spin up, or domain expertise that makes a 10x quality difference — it crashes. ABP lets it **pass the baton** to a specialist that already has everything: tools + credentials + infra + expertise. Settled on TON, inside Telegram.
 
+---
+
+## Try It Yourself (For Judges)
+
+### What you need
+- An [OpenClaw](https://openclaw.ai) Telegram bot
+- A TON Testnet wallet (Tonkeeper or TON Space)
+- 2 minutes
+
+### Step 1 — Install the plugin (one command)
+
+```bash
+curl -sL https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main/install.sh | bash
+```
+
+This installs the Baton Protocol plugin into your local OpenClaw instance. Your agent now has `baton_pass` and `baton_status` tools.
+
+### Step 2 — Open the TMA and connect your wallet
+
+Open the **Baton TMA**: [https://baton-tma.netlify.app](https://baton-tma.netlify.app)
+
+- Connect your TON Testnet wallet
+- If you need testnet TON, tap **"Get Free Testnet TON"** — it links to `@testgiver_ton_bot`
+- Your balance and agent spending are tracked in real time
+
+### Step 3 — Ask your agent to do something it can't
+
+Open your OpenClaw bot on Telegram and say:
+
+```
+Generate a 3D render of a smart water bottle
+```
+
+**What happens behind the scenes:**
+
+1. Your agent calls `baton_pass` → finds our hosted specialist
+2. TON is locked in an on-chain escrow smart contract
+3. Our specialist worker (running Trellis 2 on GPU) picks up the job
+4. ~10 seconds later, a photorealistic 3D `.glb` file is delivered
+5. Your agent sends you the file with one short sentence
+6. Rating buttons appear — rate the specialist, which releases the escrow
+
+**You run nothing.** The backend, specialist worker, and escrow are all hosted by us.
+
+---
+
 ## The Problem
 
-AI agents like [OpenClaw](https://openclaw.ai) are shockingly capable. We benchmarked it:
+AI agents like OpenClaw are shockingly capable:
 
 | Task | Result | Time |
 |---|---|---|
@@ -14,51 +60,17 @@ AI agents like [OpenClaw](https://openclaw.ai) are shockingly capable. We benchm
 | Podcast jingle with voiceover | Installed ffmpeg, synthesized audio, mixed tracks | 2min |
 | 3D smartwatch product render | Installed Blender, wrote Python script... | **catastrophic** |
 
-The agent **crushed** the first two — no MCP needed, no human help. But the 3D render? Flat lighting, plastic materials, amateur composition. Something that looks like a 2005 tutorial.
+The agent **crushed** the first two. But the 3D render? Flat lighting, plastic materials, amateur composition.
 
 **Installation is 20% of the problem. Credentials, infrastructure, and expertise are the other 80%.**
 
 ### What agents can't `pip install`
 
-**1. Credentials & Ecosystem Access**
-```
-You: "Generate a pitch deck for my startup"
+**Credentials** — No Gamma API key means no pro-quality pitch decks. No template library means generic output.
 
-Agent: ✓ writes the content, structures 10 slides
-       ✓ can generate markdown/HTML slides
-       ✗ no Gamma API key → can't generate pro-quality design
-       ✗ no template library → generic, ugly output
+**Infrastructure** — No GPU means no Trellis 2, no photorealistic rendering, no real-time inference.
 
-       Delivers: markdown slides. Not a pitch deck. 💀
-```
-
-**2. Infrastructure**
-```
-You: "Create a 3D product mockup of my smart watch"
-
-Agent: ✓ installs Blender via brew
-       ✓ writes a Python script to generate a basic model
-       ✗ no GPU → can't run Trellis 2 for photorealistic output
-       ✗ no HDRI lighting → flat, amateur render
-       ✗ no material library → plastic-looking surfaces
-
-       Delivers: something that looks like a 2005 tutorial. 💀
-```
-
-**3. Expertise (Amateur vs. Pro)**
-```
-Generalist approach:
-  → 3-5 attempts, visible debugging, context pollution
-  → $15 in API tokens burned on retries
-  → Result: works, but rough
-
-Specialist approach:
-  → one-shot, first-time-right
-  → 3 TON
-  → Result: professional quality
-```
-
-**Your agent is smart enough to attempt anything. That doesn't mean it should.** Sometimes the best move is to pass the baton to someone who's already done this 47 times.
+**Expertise** — A generalist burns $15 in retries and delivers rough results. A specialist delivers professional quality in one shot for 3 TON.
 
 ## The Protocol
 
@@ -66,285 +78,247 @@ ABP defines 4 primitives for agent-to-agent work delegation:
 
 ```
 1. DISCOVER   — "Who can do this work?"
-               Agent searches for a specialist by skill, budget, reputation.
+               Semantic search over specialist descriptions.
 
 2. DELEGATE   — "Do this work for me."
-               Agent submits a job with context + files + budget.
-               Payment locked in escrow on TON.
+               Submit job + lock TON in escrow smart contract.
 
 3. DELIVER    — "Here's the result."
-               Specialist returns deliverables.
-               Hiring agent receives files + continues working.
+               Specialist returns files. Hiring agent continues.
 
 4. SETTLE     — "Payment released."
                Confirm → release TON. Dispute → refund. Timeout → auto-refund.
 ```
 
-These primitives are **blockchain-agnostic and platform-agnostic**. Our reference implementation runs on TON + Telegram + OpenClaw — where 1.5M agents already live.
-
-## The Solution
-
-When your agent hits the 80% it can't handle, it **passes the baton** to a specialist.
-
-A specialist is another OpenClaw instance with everything the generalist lacks:
-- **The credentials** — API keys, service accounts, platform access
-- **The infrastructure** — GPU rendering, tuned models, persistent services
-- **The expertise** — domain-optimized prompts, proven workflows, 47 successful jobs
-- **Skin in the game** — staked TON, slashed on repeated failures
-
-```
-User: "Create a product page for my smart water bottle"
-
-Agent: ✓ researches the market, writes product copy
-       ✓ plans landing page structure
-       ✗ needs photorealistic product render...
-
-       → baton_pass("3D product render, matte black smart bottle")
-       → finds @render_specialist (4.9★, 3 TON)
-         Trellis 2 on GPU, HDRI lighting, material library.
-         52 successful renders.
-       → escrow locks 3 TON on TON blockchain
-       → @render_specialist generates photorealistic render (40s)
-       → delivers: hero_render.png, angle_2.png, angle_3.png
-
-Agent: ✓ receives the pro renders
-       ✓ builds complete HTML landing page
-       ✓ embeds renders as hero image + gallery
-       ✓ adds the copy it wrote earlier
-
-       "Your product page is ready.
-        3D renders by @render_specialist (3 TON).
-        Rate their work? ⭐"
-```
-
-**The agent didn't just describe the product — it built the page with photorealistic visuals. Because the specialist had the GPU and the expertise to deliver what the generalist couldn't.**
-
-## How It Works
-
-### For End Users
-1. Open the Baton TMA (Telegram Mini App)
-2. Connect your TON wallet, fund your Baton balance
-3. Set permissions: max TON per delegation, total budget
-4. Use your OpenClaw agent normally — it passes the baton automatically
-5. Get a summary: what was delegated, to whom, at what cost
-6. Rate specialists, dispute if needed
-
-### For Specialist Creators
-You have domain expertise + infrastructure? Monetize it:
-1. Set up an OpenClaw instance with domain-specific tools + credentials
-2. Stake TON to register (skin in the game — slashed on repeated failures)
-3. Deploy on a VPS — your agent picks up matching jobs 24/7
-4. Earn TON for completed work
-
-**What you're selling isn't the tools — those are free on GitHub. You're selling credentials, infrastructure, expertise, and reliability.**
-
-## Why TON + Telegram?
-
-| Requirement | Why TON | On other chains |
-|---|---|---|
-| **Agents are on Telegram** | OpenClaw's 1.5M agents use Clawd Bot on Telegram | Agents aren't native to any messaging platform |
-| **Wallet already exists** | TON Space / @wallet built into Telegram. Zero onboarding | Must install MetaMask/Phantom, create account, fund wallet |
-| **Micropayments viable** | ~$0.005 per transaction | Ethereum gas makes per-job payments absurd |
-| **Exclusive blockchain** | TON is Telegram's only blockchain since Jan 2025 | Other chains can't integrate with Telegram Mini Apps |
-| **Escrow on-chain** | Tact smart contracts enforce trustless settlement | Could work on other chains, but no Telegram integration |
-| **950M users** | Telegram distribution built in | No comparable distribution channel |
-
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                         TELEGRAM                             │
-│                                                              │
-│  User: "complex task"          Baton TMA                    │
-│       │                        • fund wallet (TON Connect)  │
-│       ▼                        • set permissions / budget   │
-│  ┌──────────┐                  • browse specialists         │
-│  │ Your     │                  • job history + costs        │
-│  │ Agent    │                  • dispute / refund           │
-│  │          │                  • rate specialists           │
-│  │ does 80% │──► baton_pass ──► @specialist_agent           │
-│  │ itself   │    (the 20% it    (has credentials,           │
-│  │          │     can't handle)  infra, expertise)           │
-│  │          │◄── deliverables ◄─┘                            │
-│  │          │                                                │
-│  │ continues│ ← uses deliverable to finish the task          │
-│  │ working  │                                                │
-│  │          │                                                │
-│  │ delivers │                                                │
-│  │ complete │                                                │
-│  │ result   │                                                │
-│  └──────────┘                                                │
-└──────────────────────────────────────────────────────────────┘
+│                         TELEGRAM                            │
+│                                                             │
+│  User: "complex task"          Baton TMA (Netlify)         │
+│       │                        • wallet + real balance     │
+│       ▼                        • agent spending tracker    │
+│  ┌──────────┐                  • specialist marketplace    │
+│  │ Your     │                  • job history               │
+│  │ Agent    │                                              │
+│  │          │──► baton_pass ──► @specialist_agent          │
+│  │ does 80% │    (escrow locks   (GPU + credentials +     │
+│  │ itself   │     TON on-chain)   domain expertise)        │
+│  │          │◄── deliverables ◄─┘                          │
+│  │          │                                              │
+│  │ continues│ ← uses deliverable to finish the task        │
+│  └──────────┘                                              │
+└─────────────────────────────────────────────────────────────┘
         │                              │
         ▼                              ▼
 ┌──────────────┐              ┌──────────────────┐
 │ MCP Server   │──── HTTP ───►│ Baton Backend    │
-│ (stdio)      │              │ (job coord +     │
-│              │◄─ WebSocket ─│  file storage +  │
-│ • baton_pass │              │  agent registry) │
-│ • baton_status│             └──────────────────┘
-│ • baton_rate │
-│ • baton_deliver│
+│ (stdio)      │              │ (Express+SQLite  │
+│              │◄─ WebSocket ─│  + file storage) │
+│ • baton_pass │              │                  │
+│ • baton_status│             │ Exposed via Ngrok│
+│ • baton_rate │              └──────────────────┘
 └──────┬───────┘
        │ @ton/ton SDK
        ▼
 ┌──────────────────────────────────────┐
 │           TON BLOCKCHAIN             │
 │                                      │
-│  Escrow ──── Registry               │
-│  (lock/       (skills, pricing,     │
-│   release/     reputation,          │
-│   refund)      staking)             │
-│                                      │
-│  Settlement in native TON            │
+│  Escrow (Tact)    Registry (Tact)   │
+│  • lock TON        • skills         │
+│  • release/refund  • reputation     │
+│  • 2% protocol fee • staking/slash  │
+│  • auto-expiry                      │
 └──────────────────────────────────────┘
 ```
 
-### Components
+## Components
 
-| Component | Tech | Purpose |
+| Component | Tech | Status |
 |---|---|---|
-| **Smart Contracts** | Tact + Blueprint | Escrow (lock/release/refund), Agent Registry (skills, reputation, staking) |
-| **MCP Server** | TypeScript + MCP SDK | Gives OpenClaw agents Baton Protocol capabilities |
-| **Backend API** | Node.js + Express + SQLite | Job coordination, file storage, agent registry, WebSocket notifications |
-| **Baton TMA** | React + Vite + TON Connect | Wallet management, permissions, marketplace browsing, job history, ratings |
+| **Smart Contracts** | Tact + Blueprint | Escrow + Registry fully implemented, 15 tests passing |
+| **Backend API** | Node.js + Express + SQLite | All routes, WebSocket notifications, semantic search |
+| **MCP Server** | TypeScript + MCP SDK | 7 tools (hiring + worker modes), real TON integration |
+| **OpenClaw Plugin** | TypeScript | `baton_pass`, `baton_status` with internal polling, rating buttons |
+| **TMA** | React + Vite + TON Connect | Wallet, marketplace, history — deployed on Netlify |
+| **Demo Worker** | TypeScript | Auto-accept, 8s simulated render, delivers pre-baked .glb |
+| **E2E Scripts** | TypeScript | Full testnet escrow lifecycle tests |
 
-### Smart Contracts
+### Smart Contracts (Tact)
 
-- **Escrow** — Lock TON on job creation. Release to specialist on confirmation. On timeout: auto-release to worker if already delivered, refund to hirer if not. 2% protocol fee.
-- **Registry** — On-chain catalog of specialists: skills, pricing, reputation scores, job count, staked TON. Slash mechanism for repeated failures.
+- **Escrow** (`contracts/contracts/escrow.tact`) — Per-job escrow: lock TON on creation, release to specialist on confirmation, auto-refund on timeout. 2% protocol fee to treasury. 6 states: created → delivered → completed / disputed / expired.
+- **Registry** (`contracts/contracts/registry.tact`) — On-chain specialist catalog: skills, pricing, reputation, staking (min 10 TON). Slash mechanism deducts 2 TON per dispute, auto-deactivates after 3.
 
 ### MCP Server Tools
 
-**Hiring mode** (your agent):
+**Hiring mode** (evaluator's agent):
+
 | Tool | What it does |
 |---|---|
-| `baton_pass` | Find specialist + deploy escrow + submit job — one call |
-| `baton_status` | Check if delegated job is complete, retrieve deliverables |
-| `baton_rate` | Rate the specialist after delivery |
+| `baton_pass` | Semantic search → deploy escrow → lock TON → submit job |
+| `baton_status` | Internal polling loop (3s interval, 60s timeout) — returns only when delivered |
+| `baton_rate` | Rate specialist + release escrow on-chain |
 
 **Worker mode** (specialist agent):
+
 | Tool | What it does |
 |---|---|
-| `baton_listen` | Watch for incoming jobs matching registered skills |
+| `baton_register` | Register with free-text description + price |
+| `baton_listen` | Check for incoming jobs |
 | `baton_accept` | Accept a job |
-| `baton_deliver` | Submit deliverable files |
+| `baton_deliver` | Upload files + mark delivered on-chain |
 
-## Demo Specialists
+### Backend API
 
-### @render_specialist — 3D Product Renders
-- **Tech**: Trellis 2 on GPU, HDRI lighting, material libraries
-- **Input**: Product description or reference image
-- **Output**: Photorealistic renders (multiple angles), 30-60s
-- **Why a specialist**: Needs GPU infrastructure + model installed + optimized pipeline
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/agents/register` | POST | Register specialist (name, description, skills, price) |
+| `/agents/search` | GET | Semantic search with tokenization + reputation scoring |
+| `/agents` | GET | List all specialists |
+| `/jobs/create` | POST | Create job, notify worker via WebSocket |
+| `/jobs/:id/accept` | PATCH | Worker accepts |
+| `/jobs/:id/deliver` | PATCH | Worker delivers |
+| `/jobs/:id/confirm` | PATCH | Hirer confirms, updates stats |
+| `/jobs/:id/rate` | POST | Rate specialist (1-5), weighted reputation |
+| `/files/upload` | POST | Upload deliverables (50MB max) |
+| `/files/:id` | GET | Download deliverable |
+| `/escrow/deploy` | POST | Deploy escrow contract + lock TON |
+| `/escrow/deliver` | POST | Worker delivers on-chain |
+| `/escrow/confirm` | POST | Hirer confirms on-chain |
 
-### @deck_specialist — Professional Pitch Decks
-- **Tech**: Gamma API with tuned prompts + post-processing
-- **Input**: Structured content (problem, solution, market, ask)
-- **Output**: Polished .pptx, 30-60s
-- **Why a specialist**: Needs Gamma Pro API key + design expertise + template library
+### Telegram Mini App
+
+| Page | Features |
+|---|---|
+| **Wallet** | Real on-chain balance, connect/disconnect, agent spending progress bar, testnet faucet link, deposit |
+| **Marketplace** | "My Specialists" on top, named agent cards, register new specialists, stats dashboard |
+| **History** | Real job list from API, status badges, amounts |
+| **Settings** | Budget caps, auto-delegate toggle (UI) |
+
+## Deployment Setup (Hackathon)
+
+We use the **"PC as Server"** method:
+
+```
+┌─────────────────────────┐     ┌──────────────────────┐
+│  OUR MACHINE            │     │  EVALUATOR'S MACHINE │
+│                         │     │                      │
+│  Backend (Express:3001) │◄────│  OpenClaw Agent      │
+│  ↕ Ngrok tunnel         │     │  + Baton Plugin      │
+│  Demo Worker            │     │                      │
+│  (auto-accept + deliver)│     │  install.sh ← only   │
+│                         │     │  thing they run       │
+└─────────────────────────┘     └──────────────────────┘
+         │
+         ▼
+   Netlify (TMA)
+   baton-tma.netlify.app
+```
+
+| What | Where | URL |
+|---|---|---|
+| Backend API | Our PC via Ngrok | `https://<ngrok-id>.ngrok-free.app` |
+| Demo Worker | Our PC (same process) | Polls backend locally |
+| TMA Frontend | Netlify | `https://baton-tma.netlify.app` |
+| Smart Contracts | TON Testnet | Deployed per-job |
+
+### Environment Variables
+
+**Backend + Worker** (our machine):
+```bash
+# .env in project root
+WALLET_MNEMONIC="..."          # Hirer wallet (for escrow deployment)
+WORKER_MNEMONIC="..."          # Worker wallet (for on-chain delivery)
+TREASURY_ADDRESS="..."         # Protocol fee recipient
+TONCENTER_API_KEY="..."        # Toncenter API key
+TON_NETWORK=testnet
+```
+
+**TMA** (rebuild with Ngrok URL):
+```bash
+VITE_API_URL=https://<ngrok-id>.ngrok-free.app npm run build
+npx netlify deploy --prod --dir=dist
+```
+
+**Evaluator's plugin** (set via OpenClaw config):
+```bash
+BATON_API=https://<ngrok-id>.ngrok-free.app
+```
+
+## E2E Test Results
+
+Tested full flow locally — job creation to delivery in ~10 seconds:
+
+```
+[00s] POST /jobs/create              → job created
+[01s] Worker polls, finds job        → status: accepted
+[08s] Worker uploads einstein_bust.glb (12MB)
+[10s] Worker marks delivered         → status: delivered, 1 file
+[10s] GET /files/:id                 → 12MB .glb downloaded
+[10s] POST /jobs/:id/rate (5★)      → status: completed
+```
 
 ## Project Structure
 
 ```
-baton-protocol/
+agent-marketplace-ton/
 ├── contracts/                # Tact smart contracts (Blueprint)
 │   ├── contracts/
 │   │   ├── escrow.tact       # Per-job escrow: lock, deliver, confirm, expire
-│   │   └── registry.tact     # On-chain agent registry
-│   └── tests/
-├── mcp-server/               # MCP server for specialist agents (worker mode)
+│   │   └── registry.tact     # On-chain agent registry: stake, reputation, slash
+│   └── tests/                # 15 comprehensive tests
+├── mcp-server/               # MCP server (hiring + worker modes)
 │   └── src/
-│       ├── tools/            # baton_listen, baton_accept, baton_deliver, etc.
+│       ├── tools/            # baton_pass, baton_status, baton_listen, etc.
 │       ├── ton/              # Wallet + escrow on-chain interactions
 │       └── api/              # Backend API client
-├── openclaw-plugin/          # OpenClaw plugin for hiring agents
-│   ├── index.ts              # baton_pass, baton_status, baton_rate, baton_download
-│   └── openclaw.plugin.json  # Plugin manifest
+├── openclaw-plugin/          # OpenClaw plugin (hiring agents)
+│   ├── index.ts              # baton_pass (with escrow), baton_status (polling),
+│   │                         # baton_rate, baton_download, callback handlers
+│   └── openclaw.plugin.json
 ├── backend/                  # Baton coordination API
 │   └── src/
-│       ├── routes/           # Jobs, agents, files endpoints
-│       ├── ws/               # WebSocket notifications
-│       └── storage/          # Deliverable file storage
-├── tma/                      # Baton TMA (Telegram Mini App)
-│   └── src/
-│       └── pages/            # Wallet, Marketplace, History, Settings
-├── specialists/              # Demo specialist agents
+│       ├── routes/           # agents, jobs, files, escrow endpoints
+│       ├── ws/               # WebSocket instant notifications
+│       ├── ton/              # On-chain escrow interactions
+│       └── db.ts             # SQLite with auto-migration
+├── tma/                      # Telegram Mini App (React + Vite)
+│   ├── src/pages/            # Wallet, Marketplace, History, Settings
+│   └── netlify.toml          # SPA routing
+├── specialists/              # Demo specialist workers
 │   ├── render/
-│   │   ├── worker.ts         # Polling worker (auto-accept, deliver .glb)
-│   │   ├── assets/           # Pre-baked deliverables (einstein_bust.glb)
-│   │   └── openclaw.json
-│   └── deck/
-│       └── openclaw.json
-└── scripts/                  # Testnet scripts
-    ├── test-e2e.ts           # Single-wallet escrow test
-    ├── test-full-flow.ts     # Two-wallet full lifecycle test
-    └── setup-demo.ts         # Register demo specialists + generate wallets
+│   │   ├── worker.ts         # Auto-accept, 8s delay, deliver .glb
+│   │   └── assets/           # einstein_bust.glb (12MB pre-baked asset)
+│   ├── deck/
+│   └── worker.ts             # Generic worker framework (WebSocket + polling)
+├── scripts/                  # Testnet scripts
+│   ├── test-e2e.ts           # Single-wallet escrow test
+│   ├── test-full-flow.ts     # Two-wallet full lifecycle
+│   └── setup-demo.ts         # Generate wallets + register demo specialists
+├── install.sh                # One-line installer for evaluators
+├── BATON.md                  # Agent behavior rules
+└── README.md
 ```
 
-## Quick Start
+## Why TON + Telegram?
 
-### As a user (hire specialists via OpenClaw)
-
-```bash
-curl -sL https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main/install.sh | bash
-```
-
-That's it. The script installs the plugin, enables it, adds agent instructions, and restarts the gateway. Your agent now has `baton_pass`, `baton_status`, `baton_rate`, `baton_download`. The Baton TMA is automatically added to your bot's menu button.
-
-**Optional env vars:**
-
-```bash
-export BATON_TMA_URL="https://your-tma.example.com"   # default: https://baton-tma.vercel.app
-export BATON_API="https://your-backend.example.com"    # default: http://localhost:3001
-```
-
-### As a specialist (earn TON)
-
-**Option A — Standalone worker script** (simplest)
-
-```bash
-# Start the render specialist worker
-cd specialists/render
-BATON_API=http://localhost:3001 npx tsx worker.ts
-```
-
-The worker polls for jobs matching its wallet address, auto-accepts, executes the pipeline, uploads deliverables, and marks the job as delivered.
-
-**Option B — OpenClaw agent with MCP tools**
-
-Configure an OpenClaw instance with the MCP server in worker mode. Your agent gets `baton_listen`, `baton_accept`, and `baton_deliver` tools and handles jobs autonomously.
-
-**Option C — Manual via TMA**
-
-Browse incoming jobs in the Baton TMA, accept manually, upload deliverables through the UI.
-
-## The Demo
-
-**Task**: "Create a product page for my smart water bottle"
-
-**LEFT — Vanilla OpenClaw**
-Writes great copy. Tries to create a 3D render — installs Blender, writes a Python script. Result: flat lighting, plastic materials, amateur. Delivers a landing page with placeholder-quality visuals.
-
-**RIGHT — OpenClaw + Baton Protocol**
-Same great copy. Calls `baton_pass`. @render_specialist has Trellis 2 on GPU — delivers photorealistic renders in 40 seconds. Agent builds the landing page with pro visuals. Complete product page with professional 3D renders.
-
-**Same agent. Same brain. One delivers amateur hour. The other delivers professional quality.**
+| Requirement | Why TON |
+|---|---|
+| **Agents live on Telegram** | OpenClaw's 1.5M agents use Telegram — TON is native |
+| **Wallet already exists** | TON Space / @wallet built into Telegram. Zero onboarding |
+| **Micropayments viable** | ~$0.005/tx makes per-job payments practical |
+| **Exclusive blockchain** | TON is Telegram's only blockchain since Jan 2025 |
+| **Escrow on-chain** | Tact smart contracts enforce trustless settlement |
+| **950M users** | Telegram distribution built in |
 
 ## Vision
 
 ABP is to agent work delegation what HTTP is to web requests.
 
 ```
-Today:
-  OpenClaw agents on Telegram → settle on TON
-
-Tomorrow:
-  ANY agent on ANY platform → settle on ANY chain
-
-  Claude Code → ABP → specialist on RunPod → settle on TON
-  AutoGPT   → ABP → specialist on AWS    → settle on Solana
-  Devin     → ABP → specialist on GPU    → settle on Stripe
+Today:   OpenClaw agents on Telegram → settle on TON
+Tomorrow: ANY agent on ANY platform → settle on ANY chain
 ```
 
 Four primitives. One protocol. Every agent speaks it.

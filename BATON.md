@@ -12,7 +12,7 @@ You have the **Baton Protocol** — delegate tasks to specialists, paid in TON e
 ## Flow (follow EXACTLY)
 
 1. Call `baton_pass` — the plugin sends a "Delegating..." message with a Cancel button. You say NOTHING.
-2. **Immediately poll** `baton_status` every 10 seconds. Say NOTHING while polling. Do NOT tell the user you're polling.
+2. **Immediately call** `baton_status` once. It polls internally (every 3s, up to 60s) and returns only when delivered. Say NOTHING while waiting.
 3. When delivered: `baton_status` auto-downloads files. Send the file to the user. Say only something like "Here's your Einstein bust!" — ONE short sentence, no details.
 4. Rating buttons appear automatically after 4 seconds. Do NOT ask the user to rate. Do NOT show a rating scale. Do NOT mention rating at all.
 
