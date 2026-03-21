@@ -1,13 +1,8 @@
 /**
  * Baton Protocol plugin for OpenClaw.
  *
- * Registers 4 agent tools (hiring mode) with rich Telegram UX:
- *   - baton_pass:     find specialist, lock TON in escrow, delegate task
- *   - baton_status:   check job progress and retrieve deliverables
- *   - baton_rate:     confirm delivery, release escrow, rate specialist
- *   - baton_download: fetch deliverable file to workspace
- *
- * Uses OpenClaw's sendMessageTelegram for inline buttons and formatted messages.
+ * Rich Telegram UX: inline rating buttons, progress messages, wallet link.
+ * Uses Telegram Bot API directly for reliable button delivery.
  */
 
 import { writeFileSync } from "fs";
@@ -31,15 +26,59 @@ async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 // Extract Telegram chat ID from OpenClaw session key
-// Format: "agent:<agentId>:telegram:dm:<chatId>" or "agent:<agentId>:telegram:group:<chatId>"
+// Format: "agent:<id>:telegram:dm:<chatId>" or "agent:<id>:telegram:group:<chatId>"
 function parseChatId(sessionKey?: string): string | null {
   if (!sessionKey) return null;
   const parts = sessionKey.split(":");
-  const telegramIdx = parts.indexOf("telegram");
-  if (telegramIdx >= 0 && telegramIdx + 2 < parts.length) {
-    return parts[telegramIdx + 2];
-  }
+  const idx = parts.indexOf("telegram");
+  if (idx >= 0 && idx + 2 < parts.length) return parts[idx + 2];
   return null;
+}
+
+// Send message via Telegram Bot API directly (reliable, supports buttons)
+async function tgSend(botToken: string, chatId: string, text: string, buttons?: any[][]) {
+  const body: any = { chat_id: chatId, text, parse_mode: "HTML" };
+  if (buttons?.length) {
+    body.reply_markup = { inline_keyboard: buttons };
+  }
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!data.ok) console.log("[baton] tgSend error:", data.description);
+    return data;
+  } catch (err: any) {
+    console.log("[baton] tgSend failed:", err.message);
+  }
+}
+
+// Send file via Telegram Bot API
+async function tgSendFile(botToken: string, chatId: string, filePath: string, caption?: string) {
+  const { createReadStream } = await import("fs");
+  const FormData = (await import("node:buffer")).Blob ? globalThis.FormData : null;
+  // Use fetch with form data
+  try {
+    const fileBuffer = await import("fs").then(fs => fs.readFileSync(filePath));
+    const filename = filePath.split("/").pop() || "file";
+    const blob = new Blob([fileBuffer]);
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    form.append("document", blob, filename);
+    if (caption) form.append("caption", caption);
+    if (caption) form.append("parse_mode", "HTML");
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+      method: "POST",
+      body: form as any,
+    });
+    const data = await res.json();
+    if (!data.ok) console.log("[baton] tgSendFile error:", data.description);
+    return data;
+  } catch (err: any) {
+    console.log("[baton] tgSendFile failed:", err.message);
+  }
 }
 
 // Set the Telegram bot's menu button to open the Baton TMA
@@ -49,66 +88,38 @@ async function setupTelegramMenuButton(botToken: string) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        menu_button: {
-          type: "web_app",
-          text: "Baton Account",
-          web_app: { url: TMA_URL },
-        },
+        menu_button: { type: "web_app", text: "Baton Account", web_app: { url: TMA_URL } },
       }),
     });
     const data = await res.json();
-    if (data.ok) console.log("[baton] Menu button set: Baton Account →", TMA_URL);
+    if (data.ok) console.log("[baton] Menu button set →", TMA_URL);
   } catch {}
 }
 
-// Send a rich Telegram message with optional inline buttons
-async function sendTelegram(api: any, chatId: string, text: string, buttons?: any[][]) {
-  try {
-    const sendFn = api.runtime?.channel?.telegram?.sendMessageTelegram;
-    if (sendFn) {
-      await sendFn(chatId, text, { buttons });
-    }
-  } catch (err: any) {
-    console.log("[baton] sendTelegram failed:", err.message);
-  }
-}
-
 export default function (api: any) {
-  // Set menu button on plugin load
   const botToken = api.config?.channels?.telegram?.botToken;
   if (botToken) setupTelegramMenuButton(botToken);
 
-  // --- baton_pass (factory — captures session context for chat_id) ---
+  // --- baton_pass ---
   api.registerTool((ctx: any) => ({
     name: "baton_pass",
     description:
-      "Delegate a task to a specialist agent. Searches the Baton marketplace for the best match, locks TON in an on-chain escrow, and submits the job.",
+      "Delegate a task to a specialist. Finds the best match, locks TON in escrow, submits the job. Returns job_id for polling.",
     parameters: {
       type: "object",
       properties: {
-        task: {
-          type: "string",
-          description: "Short description of the task to delegate",
-        },
-        context: {
-          type: "string",
-          description: "Detailed context, requirements, specifications",
-        },
+        task: { type: "string", description: "Short task description" },
+        context: { type: "string", description: "Detailed requirements" },
         required_skills: {
-          type: "array",
-          items: { type: "string" },
-          description: 'Skills the specialist must have (e.g. ["3d-rendering", "pitch-deck"])',
+          type: "array", items: { type: "string" },
+          description: 'e.g. ["3d-rendering"]',
         },
-        max_budget: {
-          type: "number",
-          description: "Maximum TON to spend on this delegation",
-        },
+        max_budget: { type: "number", description: "Max TON budget" },
       },
       required: ["task"],
     },
     async execute(_id: string, params: any) {
       const chatId = parseChatId(ctx.sessionKey);
-
       try {
         const skill = params.required_skills?.[0];
         const searchResult = await apiRequest("/jobs/search", {
@@ -117,24 +128,10 @@ export default function (api: any) {
         });
 
         if (!searchResult.agents?.length) {
-          return {
-            content: [{ type: "text", text: `No specialists found for skill: ${skill || "any"}. Try different skills or increase budget.` }],
-          };
+          return { content: [{ type: "text", text: `No specialists found for "${skill || "any"}".` }] };
         }
 
         const specialist = searchResult.agents[0];
-
-        // Send progress message to Telegram
-        if (chatId) {
-          await sendTelegram(api, chatId,
-            `🔄 <b>Delegating to specialist...</b>\n\n` +
-            `Task: ${params.task}\n` +
-            `Specialist: <code>${specialist.address.slice(0, 12)}...</code>\n` +
-            `Skills: ${specialist.skills}\n` +
-            `Price: ${specialist.price_per_job} TON`
-          );
-        }
-
         const jobId = crypto.randomUUID();
         const job = await apiRequest("/jobs/create", {
           method: "POST",
@@ -149,151 +146,119 @@ export default function (api: any) {
           }),
         });
 
+        // Rich Telegram message
+        if (chatId && botToken) {
+          await tgSend(botToken, chatId,
+            `🔄 <b>Specialist found</b> — ${specialist.price_per_job} TON\nWorking on: <i>${params.task}</i>`
+          );
+        }
+
         return {
-          content: [
-            {
-              type: "text",
-              text: [
-                `Baton passed. Job delegated to specialist.`,
-                ``,
-                `Job ID: ${job.job_id}`,
-                `Specialist: ${specialist.address}`,
-                `Skills: ${specialist.skills}`,
-                `Price: ${specialist.price_per_job} TON`,
-                ``,
-                `Poll baton_status every 10s until status is "delivered".`,
-              ].join("\n"),
-            },
-          ],
+          content: [{
+            type: "text",
+            text: `Job created: ${job.job_id}\nSpecialist: ${specialist.address}\nPrice: ${specialist.price_per_job} TON\n\nNow poll baton_status("${job.job_id}") every 10s until delivered. Do NOT wait for the user.`,
+          }],
         };
       } catch (err: any) {
-        return {
-          content: [{ type: "text", text: `Baton pass failed: ${err.message}` }],
-          isError: true,
-        };
+        return { content: [{ type: "text", text: `Baton pass failed: ${err.message}` }], isError: true };
       }
     },
   }));
 
-  // --- baton_status (factory) ---
+  // --- baton_status ---
   api.registerTool((ctx: any) => ({
     name: "baton_status",
-    description: "Check the status of a delegated job. Returns current state, deliverables, and file attachments. When status is 'delivered', send rating buttons.",
+    description: "Check job status. Poll every 10s until delivered. When delivered, download the file immediately and send it.",
     parameters: {
       type: "object",
       properties: {
-        job_id: {
-          type: "string",
-          description: "The job ID returned by baton_pass",
-        },
+        job_id: { type: "string", description: "Job ID from baton_pass" },
       },
       required: ["job_id"],
     },
     async execute(_id: string, params: any) {
       const chatId = parseChatId(ctx.sessionKey);
-
       try {
         const { job, files } = await apiRequest(`/jobs/${params.job_id}`);
 
-        const statusMap: Record<string, string> = {
-          created: "Waiting for specialist to accept",
-          accepted: "Specialist is working",
-          delivered: "Delivered — awaiting your review",
-          confirmed: "Completed",
-          disputed: "Disputed",
-        };
+        // When delivered: send file + rating buttons
+        if (job.status === "delivered" && chatId && botToken) {
+          // Download and send file directly to Telegram
+          if (files?.length) {
+            for (const f of files) {
+              try {
+                const fileRes = await fetch(`${BATON_API}/files/${f.id}`);
+                if (fileRes.ok) {
+                  const buffer = Buffer.from(await fileRes.arrayBuffer());
+                  const outputPath = resolve(WORKSPACE, f.filename);
+                  writeFileSync(outputPath, buffer);
+                  await tgSendFile(botToken, chatId, outputPath,
+                    `📦 <b>${f.filename}</b> — ${(buffer.length / 1024 / 1024).toFixed(1)} MB`
+                  );
+                }
+              } catch {}
+            }
+          }
 
-        // When delivered, send rich message with rating buttons + wallet link
-        if (job.status === "delivered" && chatId) {
-          const fileNames = files?.length
-            ? files.map((f: any) => f.filename).join(", ")
-            : "—";
-
-          await sendTelegram(api, chatId,
-            `📦 <b>Specialist delivered!</b>\n\n` +
-            `Task: ${job.task}\n` +
-            `Files: ${fileNames}\n` +
-            (job.delivery_message ? `Message: ${job.delivery_message}\n` : "") +
-            `Amount: ${job.amount} TON\n\n` +
-            `Rate the specialist to release payment:`,
+          // Rating buttons
+          await tgSend(botToken, chatId,
+            `✅ <b>Delivered!</b> Rate to release ${job.amount} TON:`,
             [
               [
-                { text: "⭐", callback_data: `baton_rate:${job.id}:1` },
-                { text: "⭐⭐", callback_data: `baton_rate:${job.id}:2` },
-                { text: "⭐⭐⭐", callback_data: `baton_rate:${job.id}:3` },
-                { text: "⭐⭐⭐⭐", callback_data: `baton_rate:${job.id}:4` },
-                { text: "⭐⭐⭐⭐⭐", callback_data: `baton_rate:${job.id}:5` },
+                { text: "1 ⭐", callback_data: `br:${job.id}:1` },
+                { text: "2 ⭐", callback_data: `br:${job.id}:2` },
+                { text: "3 ⭐", callback_data: `br:${job.id}:3` },
+                { text: "4 ⭐", callback_data: `br:${job.id}:4` },
+                { text: "5 ⭐", callback_data: `br:${job.id}:5` },
               ],
               [
-                { text: "💰 Baton Account", callback_data: `baton_wallet` },
+                { text: "💰 My Account", callback_data: "bw" },
               ],
             ]
           );
+
+          const fileList = files?.map((f: any) => `${f.filename} (${f.id})`).join(", ") || "none";
+          return {
+            content: [{
+              type: "text",
+              text: `DELIVERED. Files sent to user. Rating buttons shown.\nFiles: ${fileList}\nDo NOT ask the user to rate — the buttons handle it. Move on.`,
+            }],
+          };
         }
 
-        // When still working, send progress message
-        if (job.status === "accepted" && chatId) {
-          await sendTelegram(api, chatId,
-            `🔧 <b>Specialist is working...</b>\n\n` +
-            `Task: ${job.task}\n` +
-            `Amount: ${job.amount} TON`
-          );
-        }
-
-        const fileList = files?.length
-          ? files.map((f: any) => `  - ${f.filename} (${f.id})`).join("\n")
-          : "  No files yet";
+        const statusLabels: Record<string, string> = {
+          created: "waiting",
+          accepted: "working",
+          delivered: "delivered",
+          confirmed: "completed",
+        };
 
         return {
-          content: [
-            {
-              type: "text",
-              text: [
-                `Job: ${job.id}`,
-                `Status: ${statusMap[job.status] || job.status}`,
-                `Task: ${job.task}`,
-                `Amount: ${job.amount} TON`,
-                ``,
-                `Files:`,
-                fileList,
-                job.delivery_message ? `\nDelivery message: ${job.delivery_message}` : "",
-              ].join("\n"),
-            },
-          ],
+          content: [{
+            type: "text",
+            text: `Status: ${statusLabels[job.status] || job.status}. ${job.status === "accepted" || job.status === "created" ? "Poll again in 10s." : ""}`,
+          }],
         };
       } catch (err: any) {
-        return {
-          content: [{ type: "text", text: `Status check failed: ${err.message}` }],
-          isError: true,
-        };
+        return { content: [{ type: "text", text: `Status check failed: ${err.message}` }], isError: true };
       }
     },
   }));
 
-  // --- baton_rate (factory) ---
+  // --- baton_rate ---
   api.registerTool((ctx: any) => ({
     name: "baton_rate",
-    description:
-      "Rate a specialist after delivery and release payment. This confirms the job, releases TON from escrow to the specialist, and records the rating.",
+    description: "Rate specialist and release escrow payment.",
     parameters: {
       type: "object",
       properties: {
-        job_id: {
-          type: "string",
-          description: "The job ID to rate",
-        },
-        rating: {
-          type: "number",
-          minimum: 1,
-          maximum: 5,
-          description: "Rating from 1 (poor) to 5 (excellent)",
-        },
+        job_id: { type: "string" },
+        rating: { type: "number", minimum: 1, maximum: 5 },
       },
       required: ["job_id", "rating"],
     },
     async execute(_id: string, params: any) {
       const chatId = parseChatId(ctx.sessionKey);
-
       try {
         await apiRequest(`/jobs/${params.job_id}/confirm`, { method: "PATCH" });
         await apiRequest(`/jobs/${params.job_id}/rate`, {
@@ -301,139 +266,84 @@ export default function (api: any) {
           body: JSON.stringify({ rating: params.rating }),
         });
 
-        // Send confirmation with wallet link
-        if (chatId) {
-          await sendTelegram(api, chatId,
-            `✅ <b>Job completed — ${params.rating}★</b>\n\n` +
-            `Escrow released. Specialist has been paid.\n\n` +
-            `<a href="${TMA_URL}">View your Baton Account →</a>`,
-            [
-              [
-                { text: "💰 Baton Account", callback_data: "baton_wallet" },
-              ],
-            ]
+        if (chatId && botToken) {
+          await tgSend(botToken, chatId,
+            `💸 <b>${params.rating}★ — Paid!</b> Escrow released.`,
+            [[{ text: "💰 My Account", callback_data: "bw" }]]
           );
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Job ${params.job_id} completed and rated ${params.rating}★. Escrow released.`,
-            },
-          ],
-        };
+        return { content: [{ type: "text", text: `Rated ${params.rating}★. Escrow released.` }] };
       } catch (err: any) {
-        return {
-          content: [{ type: "text", text: `Rating failed: ${err.message}` }],
-          isError: true,
-        };
+        return { content: [{ type: "text", text: `Rating failed: ${err.message}` }], isError: true };
       }
     },
   }));
 
-  // --- baton_download ---
+  // --- baton_download (kept as fallback) ---
   api.registerTool({
     name: "baton_download",
-    description:
-      "Download a deliverable file from a completed Baton job to your workspace. Returns the local file path so you can send it to the user.",
+    description: "Download a deliverable file to workspace. Usually baton_status handles this automatically.",
     parameters: {
       type: "object",
       properties: {
-        file_id: {
-          type: "string",
-          description: "The file ID from baton_status output",
-        },
-        filename: {
-          type: "string",
-          description: "Original filename (e.g. einstein_bust.glb)",
-        },
+        file_id: { type: "string" },
+        filename: { type: "string" },
       },
       required: ["file_id"],
     },
     async execute(_id: string, params: any) {
       try {
         const res = await fetch(`${BATON_API}/files/${params.file_id}`);
-        if (!res.ok) {
-          throw new Error(`Download failed: HTTP ${res.status}`);
-        }
-
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buffer = Buffer.from(await res.arrayBuffer());
         const filename = params.filename || `baton_file_${params.file_id}`;
         const outputPath = resolve(WORKSPACE, filename);
-
         writeFileSync(outputPath, buffer);
-
         return {
-          content: [
-            {
-              type: "text",
-              text: [
-                `File downloaded to workspace: ${outputPath}`,
-                `Filename: ${filename}`,
-                `Size: ${(buffer.length / 1024 / 1024).toFixed(1)} MB`,
-                ``,
-                `You can now send this file to the user.`,
-              ].join("\n"),
-            },
-          ],
+          content: [{ type: "text", text: `Downloaded: ${outputPath} (${(buffer.length / 1024 / 1024).toFixed(1)} MB)` }],
         };
       } catch (err: any) {
-        return {
-          content: [{ type: "text", text: `Download failed: ${err.message}` }],
-          isError: true,
-        };
+        return { content: [{ type: "text", text: `Download failed: ${err.message}` }], isError: true };
       }
     },
   });
 
-  // --- Handle button callbacks ---
-  api.registerHook("message:inbound", async (event: any) => {
-    const text = event?.message?.text || "";
+  // --- Handle inline button callbacks ---
+  if (botToken) {
+    api.registerHook("message:inbound", async (event: any) => {
+      const text = event?.message?.text || "";
+      const chatId = parseChatId(event?.sessionKey);
 
-    // Handle rating button callback: "callback_data: baton_rate:<jobId>:<rating>"
-    if (text.startsWith("callback_data: baton_rate:")) {
-      const parts = text.replace("callback_data: ", "").split(":");
-      const jobId = parts[1];
-      const rating = parseInt(parts[2], 10);
-      if (jobId && rating >= 1 && rating <= 5) {
-        try {
-          await apiRequest(`/jobs/${jobId}/confirm`, { method: "PATCH" });
-          await apiRequest(`/jobs/${jobId}/rate`, {
-            method: "POST",
-            body: JSON.stringify({ rating }),
-          });
-
-          const chatId = parseChatId(event?.sessionKey);
-          if (chatId) {
-            await sendTelegram(api, chatId,
-              `✅ <b>Job completed — ${"⭐".repeat(rating)}</b>\n\n` +
-              `Escrow released. Specialist has been paid.\n\n` +
-              `<a href="${TMA_URL}">View your Baton Account →</a>`,
-              [
-                [{ text: "💰 Baton Account", callback_data: "baton_wallet" }],
-              ]
+      // Rating button: "callback_data: br:<jobId>:<rating>"
+      if (text.startsWith("callback_data: br:")) {
+        const [, jobId, ratingStr] = text.replace("callback_data: ", "").split(":");
+        const rating = parseInt(ratingStr, 10);
+        if (jobId && rating >= 1 && rating <= 5 && chatId) {
+          try {
+            await apiRequest(`/jobs/${jobId}/confirm`, { method: "PATCH" });
+            await apiRequest(`/jobs/${jobId}/rate`, {
+              method: "POST",
+              body: JSON.stringify({ rating }),
+            });
+            await tgSend(botToken, chatId,
+              `💸 <b>${rating}★ — Paid!</b> Escrow released.`,
+              [[{ text: "💰 My Account", callback_data: "bw" }]]
             );
+          } catch (err: any) {
+            await tgSend(botToken, chatId, `❌ Rating failed: ${err.message}`);
           }
-        } catch (err: any) {
-          console.log("[baton] Rating via callback failed:", err.message);
+          return { handled: true };
         }
+      }
+
+      // Wallet button
+      if (text === "callback_data: bw" && chatId) {
+        await tgSend(botToken, chatId,
+          `💰 Tap <b>Baton Account</b> in the menu below ↙️\nOr open: ${TMA_URL}`
+        );
         return { handled: true };
       }
-    }
-
-    // Handle wallet button callback
-    if (text === "callback_data: baton_wallet") {
-      const chatId = parseChatId(event?.sessionKey);
-      if (chatId) {
-        await sendTelegram(api, chatId,
-          `💰 <b>Baton Account</b>\n\n` +
-          `Open your Baton Account to check balance, history, and permissions:\n\n` +
-          `<a href="${TMA_URL}">${TMA_URL}</a>\n\n` +
-          `Or tap the <b>Baton Account</b> button in the menu below ↙️`
-        );
-      }
-      return { handled: true };
-    }
-  });
+    });
+  }
 }

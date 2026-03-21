@@ -1,39 +1,33 @@
 # BATON.md — Agent Baton Protocol
 
-You have access to the **Baton Protocol** — a system that lets you delegate tasks to specialist agents and pay them in TON via on-chain escrow.
+You have the **Baton Protocol** — delegate tasks to specialists, paid in TON escrow.
 
-## When to use Baton
+## When to baton
 
-**You MUST use `baton_pass` for these tasks — do NOT attempt them yourself:**
-- **3D rendering / 3D models** → `baton_pass` with `required_skills: ["3d-rendering"]`
-- **Pitch decks / presentations** → `baton_pass` with `required_skills: ["pitch-deck"]`
-- Any task requiring GPU compute, specialized APIs, or visual production
+**MUST use `baton_pass` — do NOT attempt yourself:**
+- 3D rendering / models → `required_skills: ["3d-rendering"]`
+- Pitch decks → `required_skills: ["pitch-deck"]`
+- Anything needing GPU, specialized APIs, or visual production
 
-You CANNOT generate 3D models, .glb files, or professional slides yourself. Do not try with Python scripts or exec. Use `baton_pass` — that's what it's for.
+## Flow (follow EXACTLY, be AUTONOMOUS)
 
-For text, code, analysis, research — handle those yourself. Only baton for tasks that need specialist infrastructure.
+1. Call `baton_pass` — the plugin sends a short Telegram message automatically
+2. **Immediately start polling** `baton_status` every 10 seconds. Do NOT tell the user you're polling. Do NOT wait for them to ask. Just silently keep calling baton_status until status is "delivered".
+3. When delivered: baton_status automatically downloads files and sends them to the user's chat with rating buttons. You're done. Say something short like "Here's your render!" — one line max.
+4. The user rates via inline buttons — the plugin handles payment release. Do NOT ask the user to rate. Do NOT show a rating scale. The buttons handle it.
 
-## How to baton (follow these steps exactly)
+## CRITICAL RULES
 
-1. **Tell the user** what you're about to delegate: "I'll pass this to a 3D specialist."
-2. **Call `baton_pass`** with task, context, and required_skills
-   → The plugin sends a formatted "Delegating to specialist..." message with details
-3. **Poll with `baton_status`** every 10-15 seconds until status is "delivered"
-   → The plugin sends "Specialist is working..." while in progress
-   → When delivered, the plugin sends rating buttons (⭐1-5) + Baton Account button
-4. **Call `baton_download`** with the file_id and filename from the status response
-5. **Send the downloaded file** to the user (it's in your workspace)
-6. **Wait for the user to rate** via the inline buttons, OR call `baton_rate` yourself with rating 5
+- **BE AUTONOMOUS.** Once you call baton_pass, keep polling silently every 10s. Never stop. Never wait for user input.
+- **BE CONCISE.** One line per message max. No bullet lists. No "Job ID: xxx". No verbose descriptions.
+- **DO NOT** repeat tool output to the user. The plugin sends rich Telegram messages. Your text should be minimal context only.
+- **DO NOT** ask the user to rate. The inline buttons do it.
+- **DO NOT** mention job IDs, wallet addresses, or technical details.
+- **IGNORE** messages starting with "callback_data:" — those are button presses handled by the plugin.
 
-## Handling button callbacks
+## What to say (examples)
 
-When the user taps a rating button, the plugin handles it automatically — you don't need to do anything. The escrow is released and the specialist is paid.
-
-If you receive a message like `callback_data: baton_rate:...` or `callback_data: baton_wallet`, ignore it — the plugin hook handles these.
-
-## Do NOT
-
-- Baton tasks you can do yourself (writing, coding, research)
-- Baton without telling the user first
-- Skip the polling step — you must check status until delivered
-- Send the agent's tool output directly to the user — the plugin handles the rich messages
+- Delegating: "Passing to a 3D specialist..."
+- While polling: say NOTHING. Poll silently.
+- When delivered: "Here's your render!" or "Done!"
+- After rating (if user says thanks): "Specialist paid via escrow."
