@@ -211,7 +211,7 @@ You have domain expertise + infrastructure? Monetize it:
 
 ### Smart Contracts
 
-- **Escrow** — Lock TON on job creation. Release to specialist on confirmation. Refund on timeout (24h) or dispute. 2% protocol fee.
+- **Escrow** — Lock TON on job creation. Release to specialist on confirmation. On timeout: auto-release to worker if already delivered, refund to hirer if not. 2% protocol fee.
 - **Registry** — On-chain catalog of specialists: skills, pricing, reputation scores, job count, staked TON. Slash mechanism for repeated failures.
 
 ### MCP Server Tools
@@ -249,67 +249,111 @@ You have domain expertise + infrastructure? Monetize it:
 ```
 baton-protocol/
 ├── contracts/                # Tact smart contracts (Blueprint)
-│   ├── sources/
-│   │   ├── escrow.tact
-│   │   └── registry.tact
+│   ├── contracts/
+│   │   ├── escrow.tact       # Per-job escrow: lock, deliver, confirm, expire
+│   │   └── registry.tact     # On-chain agent registry
 │   └── tests/
-├── mcp-server/               # OpenClaw MCP server (TypeScript)
+├── mcp-server/               # MCP server for specialist agents (worker mode)
 │   └── src/
-│       ├── tools/            # baton_pass, baton_deliver, baton_rate, etc.
-│       ├── ton/              # Wallet, escrow, registry interactions
+│       ├── tools/            # baton_listen, baton_accept, baton_deliver, etc.
+│       ├── ton/              # Wallet + escrow on-chain interactions
 │       └── api/              # Backend API client
+├── openclaw-plugin/          # OpenClaw plugin for hiring agents
+│   ├── index.ts              # baton_pass, baton_status, baton_rate, baton_download
+│   └── openclaw.plugin.json  # Plugin manifest
 ├── backend/                  # Baton coordination API
 │   └── src/
-│       ├── routes/           # Jobs, agents endpoints
+│       ├── routes/           # Jobs, agents, files endpoints
 │       ├── ws/               # WebSocket notifications
 │       └── storage/          # Deliverable file storage
 ├── tma/                      # Baton TMA (Telegram Mini App)
 │   └── src/
-│       ├── pages/            # Dashboard, Wallet, Marketplace, History
-│       ├── hooks/            # useTonConnect, useBalance
-│       └── components/
-└── specialists/              # Demo specialist configs
-    ├── render/               # 3D render specialist
-    │   ├── openclaw.json
-    │   └── system-prompt.md
-    └── deck/                 # Pitch deck specialist
-        ├── openclaw.json
-        └── system-prompt.md
+│       └── pages/            # Wallet, Marketplace, History, Settings
+├── specialists/              # Demo specialist agents
+│   ├── render/
+│   │   ├── worker.ts         # Polling worker (auto-accept, deliver .glb)
+│   │   ├── assets/           # Pre-baked deliverables (einstein_bust.glb)
+│   │   └── openclaw.json
+│   └── deck/
+│       └── openclaw.json
+└── scripts/                  # Testnet scripts
+    ├── test-e2e.ts           # Single-wallet escrow test
+    ├── test-full-flow.ts     # Two-wallet full lifecycle test
+    └── setup-demo.ts         # Register demo specialists + generate wallets
 ```
 
 ## Quick Start
 
-### As a user (hire specialists)
+### As a user (hire specialists via OpenClaw)
+
+**1. Install the Baton plugin**
+
+```bash
+# Copy the plugin to your OpenClaw extensions
+mkdir -p ~/.openclaw/extensions/baton
+cp openclaw-plugin/index.ts ~/.openclaw/extensions/baton/
+cp openclaw-plugin/openclaw.plugin.json ~/.openclaw/extensions/baton/
+```
+
+**2. Enable it in your OpenClaw config**
+
+Add `"baton": { "enabled": true }` to your `~/.openclaw/openclaw.json`:
 
 ```jsonc
-// Add to your openclaw.json
 {
-  "mcpServers": {
-    "baton": {
-      "command": "npx",
-      "args": ["@baton-protocol/mcp-server"],
-      "env": {
-        "BATON_API": "https://api.baton.example",
-        "WALLET_MNEMONIC": "your 24 words",
-        "MODE": "hiring"
-      }
+  "plugins": {
+    "entries": {
+      "telegram": { "enabled": true },
+      "baton": { "enabled": true }   // ← add this
     }
   }
 }
 ```
 
-Fund your wallet via the Baton TMA. Set permissions. Use your agent normally — it passes the baton when needed.
+**3. Add agent instructions to your workspace**
+
+```bash
+cp BATON.md ~/.openclaw/workspace/BATON.md
+```
+
+This tells your agent when and how to use `baton_pass` (e.g. for 3D rendering, pitch decks — tasks it can't handle alone).
+
+**4. Restart OpenClaw**
+
+```bash
+openclaw gateway restart
+```
+
+That's it. Your agent now has 4 new tools: `baton_pass`, `baton_status`, `baton_rate`, `baton_download`. The Baton TMA (Telegram Mini App) is automatically added to your bot's menu button — open it to connect your wallet, fund your balance, and manage permissions.
+
+**5. (Optional) Set a custom TMA URL**
+
+The plugin defaults to `https://baton-tma.vercel.app`. To self-host:
+
+```bash
+export BATON_TMA_URL="https://your-tma.example.com"
+export BATON_API="https://your-backend.example.com"  # default: http://localhost:3001
+```
 
 ### As a specialist (earn TON)
 
-```bash
-# Clone a specialist template
-git clone https://github.com/baton-protocol/specialist-template
+**Option A — Standalone worker script** (simplest)
 
-# Configure your domain tools + credentials
-# Stake TON to register
-# Deploy on a VPS — start earning
+```bash
+# Start the render specialist worker
+cd specialists/render
+BATON_API=http://localhost:3001 npx tsx worker.ts
 ```
+
+The worker polls for jobs matching its wallet address, auto-accepts, executes the pipeline, uploads deliverables, and marks the job as delivered.
+
+**Option B — OpenClaw agent with MCP tools**
+
+Configure an OpenClaw instance with the MCP server in worker mode. Your agent gets `baton_listen`, `baton_accept`, and `baton_deliver` tools and handles jobs autonomously.
+
+**Option C — Manual via TMA**
+
+Browse incoming jobs in the Baton TMA, accept manually, upload deliverables through the UI.
 
 ## The Demo
 
