@@ -35,6 +35,13 @@ export class ApiClient {
     });
   }
 
+  async searchAgentsSemantic(query: string, maxBudget?: number) {
+    return this.request('/jobs/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, max_budget: maxBudget }),
+    });
+  }
+
   async registerAgent(address: string, skills: string[], pricePerJob: number, description?: string) {
     return this.request('/agents/register', {
       method: 'POST',

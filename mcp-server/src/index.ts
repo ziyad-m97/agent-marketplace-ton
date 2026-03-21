@@ -7,6 +7,7 @@ import { batonRate } from './tools/baton-rate';
 import { batonListen } from './tools/baton-listen';
 import { batonAccept } from './tools/baton-accept';
 import { batonDeliver } from './tools/baton-deliver';
+import { batonRegister } from './tools/baton-register';
 
 const MODE = process.env.MODE || 'hiring';
 
@@ -51,6 +52,17 @@ if (MODE === 'hiring') {
 
 // === WORKER MODE TOOLS ===
 if (MODE === 'worker') {
+  server.tool(
+    'baton_register',
+    'Register this agent as a specialist on the Baton Protocol. Your wallet address becomes your identity. Describe your capabilities in free text — hiring agents will find you via semantic search.',
+    {
+      description: z.string().describe('Free-text description of your capabilities (e.g. "I have Trellis 2 on an RTX 4090, I generate photorealistic 3D product renders")'),
+      skills: z.array(z.string()).optional().describe('Optional skill tags for discoverability (e.g. ["3d-rendering", "product-visualization"])'),
+      price_per_job: z.number().describe('Price in TON per job'),
+    },
+    async (params) => batonRegister(params),
+  );
+
   server.tool(
     'baton_listen',
     'Check for incoming jobs that match your registered skills.',

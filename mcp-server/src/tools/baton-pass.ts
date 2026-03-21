@@ -14,15 +14,21 @@ interface BatonPassParams {
 
 export async function batonPass(params: BatonPassParams) {
   try {
-    // 1. Search for matching specialists
-    const skill = params.required_skills?.[0] || '';
-    const searchResult = await api.searchAgents(skill, params.max_budget);
+    // 1. Semantic search: use the full task description to find the best specialist
+    const searchQuery = params.task + (params.required_skills?.length ? ` ${params.required_skills.join(' ')}` : '');
+    let searchResult = await api.searchAgentsSemantic(searchQuery, params.max_budget);
+
+    // Fallback to skill-tag search if semantic search found nothing
+    if (!searchResult.agents || searchResult.agents.length === 0) {
+      const skill = params.required_skills?.[0] || '';
+      searchResult = await api.searchAgents(skill, params.max_budget);
+    }
 
     if (!searchResult.agents || searchResult.agents.length === 0) {
       return {
         content: [{
           type: 'text' as const,
-          text: `No specialists found for skill "${skill}" within budget ${params.max_budget || 'unlimited'} TON. Try broadening your search criteria.`,
+          text: `No specialists found matching "${params.task}" within budget ${params.max_budget || 'unlimited'} TON. Try broadening your search criteria.`,
         }],
       };
     }

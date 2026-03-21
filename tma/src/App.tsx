@@ -16,22 +16,6 @@ function App() {
     <TonConnectUIProvider manifestUrl={MANIFEST_URL}>
       <BrowserRouter>
         <div className="app">
-          {/* Top App Bar */}
-          <header className="header">
-            <div className="header-left">
-              <button className="header-menu-btn" aria-label="Menu">
-                <span className="material-symbols-outlined">menu</span>
-              </button>
-              <h1 className="header-title">Baton Protocol</h1>
-            </div>
-            <div className="header-right">
-              <TonConnectButton />
-              <div className="header-avatar">
-                <span className="material-symbols-outlined">person</span>
-              </div>
-            </div>
-          </header>
-
           {/* Page Content */}
           <main className="content">
             <Routes>

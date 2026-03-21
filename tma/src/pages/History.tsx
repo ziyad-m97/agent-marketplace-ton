@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { TonConnectButton } from '@tonconnect/ui-react';
 
 interface Job {
   id: string;
@@ -61,9 +62,26 @@ export function History() {
 
   return (
     <div>
-      <h2 className="page-title">Job History</h2>
+      {/* Top App Bar */}
+      <header className="header">
+        <div className="header-left">
+          <button className="header-menu-btn" aria-label="Menu">
+            <span className="material-symbols-outlined">menu</span>
+          </button>
+          <h1 className="header-title">History</h1>
+        </div>
+        <div className="header-right">
+          <TonConnectButton />
+          <div className="header-avatar">
+            <span className="material-symbols-outlined">person</span>
+          </div>
+        </div>
+      </header>
 
-      <div className="space-y-sm">
+      <div style={{ paddingTop: 24 }}>
+        <h2 className="page-title">Job History</h2>
+
+        <div className="space-y-sm">
         {jobs.map(job => (
           <div className="job-item" key={job.id}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
@@ -98,6 +116,7 @@ export function History() {
           </div>
         ))}
       </div>
+    </div>
     </div>
   );
 }

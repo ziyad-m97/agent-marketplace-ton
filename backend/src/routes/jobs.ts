@@ -5,27 +5,59 @@ import { broadcastToWorkers } from '../ws/notifications';
 
 export const jobsRouter = Router();
 
-// Search specialists by skill + budget
-jobsRouter.post('/search', (req: Request, res: Response) => {
-  const { skill, max_budget } = req.body;
+// Search specialists — delegates to /agents/search for semantic matching
+// Kept for backward compat with MCP tools that POST here
+jobsRouter.post('/search', async (req: Request, res: Response) => {
+  const { skill, max_budget, query: freeTextQuery } = req.body;
   const db = getDb();
 
-  let query = 'SELECT * FROM agents WHERE active = 1';
+  // If a free-text query is provided, use semantic search
+  const searchQuery = freeTextQuery || skill || '';
+
+  // Forward to the agents search logic inline
+  let dbQuery = 'SELECT * FROM agents WHERE active = 1';
   const params: any[] = [];
 
-  if (skill) {
-    query += ' AND skills LIKE ?';
-    params.push(`%${skill}%`);
-  }
   if (max_budget) {
-    query += ' AND price_per_job <= ?';
+    dbQuery += ' AND price_per_job <= ?';
     params.push(max_budget);
   }
 
-  query += ' ORDER BY reputation DESC, total_jobs DESC';
+  const agents = db.prepare(dbQuery).all(...params);
 
-  const agents = db.prepare(query).all(...params);
-  res.json({ agents });
+  // Tokenize and score (same logic as /agents/search)
+  const stopWords = new Set([
+    'i', 'a', 'an', 'the', 'is', 'am', 'are', 'was', 'were', 'be', 'been',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'can', 'could',
+    'should', 'may', 'might', 'to', 'of', 'in', 'on', 'at', 'by', 'for',
+    'with', 'from', 'and', 'but', 'or', 'so', 'if', 'that', 'this', 'it',
+    'my', 'me', 'we', 'our', 'you', 'your', 'not', 'no', 'very', 'just',
+  ]);
+  const queryTokens = searchQuery.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/).filter((w: string) => w.length > 1 && !stopWords.has(w));
+
+  const scored = agents.map((agent: any) => {
+    const skillsArr: string[] = (() => { try { return JSON.parse(agent.skills); } catch { return []; } })();
+    const agentText = [...skillsArr, agent.description || ''].join(' ');
+    const agentTokens = agentText.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ')
+      .split(/\s+/).filter((w: string) => w.length > 1);
+    const agentTextLower = agentText.toLowerCase();
+
+    let score = 0;
+    for (const qt of queryTokens) {
+      if (agentTokens.includes(qt)) { score += 10; continue; }
+      if (agentTokens.some((at: string) => at.includes(qt) || qt.includes(at))) { score += 6; continue; }
+      if (agentTextLower.includes(qt)) { score += 4; }
+    }
+    const matchScore = queryTokens.length > 0 ? score / queryTokens.length : 0;
+    const repBoost = (agent.reputation || 0) * 0.4;
+    const expBoost = Math.log2((agent.total_jobs || 0) + 1) * 0.5;
+
+    return { ...agent, skills: skillsArr, _score: matchScore + repBoost + expBoost };
+  }).filter((a: any) => a._score > 0 || queryTokens.length === 0)
+    .sort((a: any, b: any) => b._score - a._score);
+
+  res.json({ agents: scored });
 });
 
 // Create a new job
