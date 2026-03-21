@@ -122,6 +122,20 @@ export default function (api: any) {
           );
         }
 
+        // Deploy real escrow contract and lock TON on-chain
+        try {
+          await apiRequest("/escrow/deploy", {
+            method: "POST",
+            body: JSON.stringify({
+              job_id: jobId,
+              worker_address: specialist.address,
+              amount: specialist.price_per_job,
+            }),
+          });
+        } catch (escrowErr: any) {
+          console.log(`[baton] Escrow deploy failed: ${escrowErr.message} — job continues without on-chain escrow`);
+        }
+
         return {
           content: [{
             type: "text",
@@ -225,7 +239,16 @@ export default function (api: any) {
     },
     async execute(_id: string, params: any) {
       try {
-        await apiRequest(`/jobs/${params.job_id}/confirm`, { method: "PATCH" });
+        // Confirm escrow on-chain (releases TON to specialist)
+        try {
+          await apiRequest(`/escrow/confirm`, {
+            method: "POST",
+            body: JSON.stringify({ job_id: params.job_id }),
+          });
+        } catch (escrowErr: any) {
+          console.log(`[baton] On-chain confirm failed: ${escrowErr.message} — falling back`);
+          await apiRequest(`/jobs/${params.job_id}/confirm`, { method: "PATCH" });
+        }
         await apiRequest(`/jobs/${params.job_id}/rate`, {
           method: "POST",
           body: JSON.stringify({ rating: params.rating }),
@@ -277,7 +300,17 @@ export default function (api: any) {
         const rating = parseInt(ratingStr, 10);
         if (jobId && rating >= 1 && rating <= 5) {
           try {
-            await apiRequest(`/jobs/${jobId}/confirm`, { method: "PATCH" });
+            await tgSend(botToken, chatId, `⏳ Releasing payment on-chain...`);
+            // Confirm escrow on-chain (releases TON to specialist)
+            try {
+              await apiRequest(`/escrow/confirm`, {
+                method: "POST",
+                body: JSON.stringify({ job_id: jobId }),
+              });
+            } catch (escrowErr: any) {
+              console.log(`[baton] On-chain confirm failed: ${escrowErr.message} — falling back to backend confirm`);
+              await apiRequest(`/jobs/${jobId}/confirm`, { method: "PATCH" });
+            }
             await apiRequest(`/jobs/${jobId}/rate`, {
               method: "POST",
               body: JSON.stringify({ rating }),

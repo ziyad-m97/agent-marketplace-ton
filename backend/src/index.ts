@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -5,6 +8,7 @@ import { setupWebSocket } from './ws/notifications';
 import { jobsRouter } from './routes/jobs';
 import { agentsRouter } from './routes/agents';
 import { filesRouter } from './routes/files';
+import { escrowRouter } from './routes/escrow';
 import { initDb } from './db';
 
 const app = express();
@@ -18,6 +22,7 @@ app.use(express.json());
 app.use('/jobs', jobsRouter);
 app.use('/agents', agentsRouter);
 app.use('/files', filesRouter);
+app.use('/escrow', escrowRouter);
 
 // Health check
 app.get('/health', (_req, res) => {

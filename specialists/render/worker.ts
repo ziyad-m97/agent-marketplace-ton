@@ -14,7 +14,8 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 
 const BATON_API = process.env.BATON_API || "http://localhost:3001";
-const WORKER_ADDRESS = process.env.WORKER_ADDRESS || "EQBdluc-CpcxcKO1YG9cawsHBPUt9Haiq41UscZ-BUfuEKJr";
+const WORKER_ADDRESS = process.env.WORKER_ADDRESS || "EQA2rYgDkCJ_bfip7-LL8y_TFSJDGHjq5L3ARlCK0ZzLibmW";
+const WORKER_MNEMONIC = process.env.WORKER_MNEMONIC || "";
 const POLL_INTERVAL = 5000; // 5 seconds
 const FAKE_WORK_DURATION = 8000; // 8 seconds to simulate generation
 
@@ -87,7 +88,20 @@ async function processJob(job: any) {
     console.log("⚠ No asset file found, delivering without file");
   }
 
-  // Mark as delivered
+  // Deliver on-chain (sends Deliver tx from worker wallet)
+  if (WORKER_MNEMONIC && job.escrow_address && !job.escrow_address.startsWith("pending")) {
+    try {
+      await apiRequest(`/escrow/deliver`, {
+        method: "POST",
+        body: JSON.stringify({ job_id: job.id, worker_mnemonic: WORKER_MNEMONIC }),
+      });
+      console.log("✓ On-chain delivery confirmed");
+    } catch (err: any) {
+      console.log(`⚠ On-chain delivery failed: ${err.message} — continuing with backend delivery`);
+    }
+  }
+
+  // Mark as delivered in backend
   await apiRequest(`/jobs/${job.id}/deliver`, {
     method: "PATCH",
     body: JSON.stringify({ message: deliveryMessage }),
