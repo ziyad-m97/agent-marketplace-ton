@@ -115,15 +115,38 @@ contract Escrow with Deployable {
         require(self.status == 0 || self.status == 1, "Cannot expire in current state");
         require(msg.jobId == self.jobId, "Job ID mismatch");
 
+        let wasDelivered: Bool = self.status == 1;
         self.status = 4; // expired
 
-        // Refund hirer
-        send(SendParameters{
-            to: self.hirer,
-            value: self.amount,
-            mode: SendIgnoreErrors,
-            body: "Baton: job expired, refunded".asComment()
-        });
+        if (wasDelivered) {
+            // Worker delivered but hirer never confirmed → auto-release to worker
+            let fee: Int = self.amount * self.protocolFeeBps / 10000;
+            let workerPayment: Int = self.amount - fee;
+
+            send(SendParameters{
+                to: self.worker,
+                value: workerPayment,
+                mode: SendIgnoreErrors,
+                body: "Baton: auto-released after deadline".asComment()
+            });
+
+            if (fee > 0) {
+                send(SendParameters{
+                    to: self.treasury,
+                    value: fee,
+                    mode: SendIgnoreErrors,
+                    body: "Baton: protocol fee".asComment()
+                });
+            }
+        } else {
+            // Never delivered → refund hirer
+            send(SendParameters{
+                to: self.hirer,
+                value: self.amount,
+                mode: SendIgnoreErrors,
+                body: "Baton: job expired, refunded".asComment()
+            });
+        }
     }
 
     // Getters

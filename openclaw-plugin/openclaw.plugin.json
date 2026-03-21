@@ -1,0 +1,11 @@
+{
+  "id": "baton",
+  "name": "Baton Protocol",
+  "version": "0.1.0",
+  "description": "Agent Baton Protocol — delegate tasks to specialist agents with TON escrow settlement",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

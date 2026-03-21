@@ -173,6 +173,81 @@ describe('Escrow', () => {
         expect(hirerBalanceAfter).toBeGreaterThan(hirerBalanceBefore);
     });
 
+    it('should auto-release to worker when expired after delivery', async () => {
+        // Use a short deadline (1 second from now)
+        const shortDeadline = BigInt(Math.floor(Date.now() / 1000) + 1);
+        const shortEscrow = blockchain.openContract(
+            await Escrow.fromInit(hirer.address, worker.address, treasury.address, shortDeadline, 'job_expire')
+        );
+        await shortEscrow.send(hirer.getSender(), { value: toNano('0.05') }, { $$type: 'Deploy', queryId: 0n });
+
+        // Lock
+        await shortEscrow.send(hirer.getSender(), { value: toNano('10') }, { $$type: 'Lock', jobId: 'job_expire' });
+
+        // Deliver
+        await shortEscrow.send(worker.getSender(), { value: toNano('0.05') }, { $$type: 'Deliver', jobId: 'job_expire' });
+        const statusAfterDeliver = await shortEscrow.getStatus();
+        expect(statusAfterDeliver).toEqual(1n);
+
+        // Wait for deadline to pass
+        blockchain.now = Math.floor(Date.now() / 1000) + 10;
+
+        // Expire — should auto-release to worker, not refund hirer
+        const workerBalanceBefore = await worker.getBalance();
+        const treasuryBalanceBefore = await treasury.getBalance();
+
+        const expireResult = await shortEscrow.send(
+            hirer.getSender(),
+            { value: toNano('0.05') },
+            { $$type: 'Expire', jobId: 'job_expire' }
+        );
+
+        expect(expireResult.transactions).toHaveTransaction({
+            from: shortEscrow.address,
+            to: worker.address,
+            success: true,
+        });
+
+        const status = await shortEscrow.getStatus();
+        expect(status).toEqual(4n); // expired
+
+        // Worker should have received payment
+        const workerBalanceAfter = await worker.getBalance();
+        expect(workerBalanceAfter).toBeGreaterThan(workerBalanceBefore);
+
+        // Treasury should have received fee
+        const treasuryBalanceAfter = await treasury.getBalance();
+        expect(treasuryBalanceAfter).toBeGreaterThan(treasuryBalanceBefore);
+    });
+
+    it('should refund hirer when expired before delivery', async () => {
+        const shortDeadline = BigInt(Math.floor(Date.now() / 1000) + 1);
+        const shortEscrow = blockchain.openContract(
+            await Escrow.fromInit(hirer.address, worker.address, treasury.address, shortDeadline, 'job_expire2')
+        );
+        await shortEscrow.send(hirer.getSender(), { value: toNano('0.05') }, { $$type: 'Deploy', queryId: 0n });
+
+        // Lock but NO deliver
+        await shortEscrow.send(hirer.getSender(), { value: toNano('10') }, { $$type: 'Lock', jobId: 'job_expire2' });
+
+        blockchain.now = Math.floor(Date.now() / 1000) + 10;
+
+        const hirerBalanceBefore = await hirer.getBalance();
+
+        await shortEscrow.send(
+            hirer.getSender(),
+            { value: toNano('0.05') },
+            { $$type: 'Expire', jobId: 'job_expire2' }
+        );
+
+        const status = await shortEscrow.getStatus();
+        expect(status).toEqual(4n);
+
+        // Hirer should have been refunded
+        const hirerBalanceAfter = await hirer.getBalance();
+        expect(hirerBalanceAfter).toBeGreaterThan(hirerBalanceBefore);
+    });
+
     it('should reject confirm before delivery', async () => {
         // Lock
         await escrow.send(
