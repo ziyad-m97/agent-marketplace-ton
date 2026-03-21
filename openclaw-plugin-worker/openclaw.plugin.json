@@ -1,0 +1,7 @@
+{
+  "id": "baton-worker",
+  "name": "Baton Worker",
+  "version": "1.0.0",
+  "description": "Baton Protocol specialist worker — listens for jobs, accepts, and delivers.",
+  "entry": "index.ts"
+}

@@ -1,7 +1,11 @@
 /**
  * Baton Protocol plugin for OpenClaw.
  *
- * UX rules:
+ * Supports two modes via BATON_MODE env var:
+ * - "hiring" (default): baton_pass, baton_status, baton_rate, baton_download
+ * - "worker": baton_listen, baton_accept, baton_deliver
+ *
+ * Hiring UX rules:
  * - Plugin sends "Delegating..." message with Cancel button (from baton_pass)
  * - Plugin sends rating buttons 4s after delivery (from baton_status)
  * - Plugin handles button callbacks (rating + wallet)
@@ -9,12 +13,15 @@
  * - No job IDs, prices, or specialist details shown to user
  */
 
-import { writeFileSync } from "fs";
+import { writeFileSync, readFileSync } from "fs";
 import { resolve } from "path";
 
 const BATON_API = process.env.BATON_API || "http://localhost:3001";
+const BATON_MODE = process.env.BATON_MODE || "hiring"; // "hiring" or "worker"
 const TMA_URL = process.env.BATON_TMA_URL || "https://baton-tma.vercel.app";
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE || resolve(process.env.HOME || "~", ".openclaw/workspace");
+const WORKER_ADDRESS = process.env.WORKER_ADDRESS || "";
+const WORKER_MNEMONIC = process.env.WORKER_MNEMONIC || "";
 
 async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
   const url = `${BATON_API}${endpoint}`;
@@ -66,9 +73,130 @@ async function setupTelegramMenuButton(botToken: string) {
 // Track active jobs for cancel support
 const activeJobs = new Map<string, string>(); // jobId → status
 
+async function uploadFile(jobId: string, filePath: string) {
+  const fileBuffer = readFileSync(filePath);
+  const fileName = filePath.split("/").pop()!;
+  const formData = new FormData();
+  formData.append("job_id", jobId);
+  formData.append("uploaded_by", WORKER_ADDRESS);
+  formData.append("files", new Blob([fileBuffer]), fileName);
+  const res = await fetch(`${BATON_API}/files/upload`, { method: "POST", body: formData });
+  if (!res.ok) throw new Error(`File upload failed: ${res.statusText}`);
+  return res.json();
+}
+
 export default function (api: any) {
   const botToken = api.config?.channels?.telegram?.botToken;
   if (botToken) setupTelegramMenuButton(botToken);
+
+  // ============================================================
+  // WORKER MODE — specialist tools
+  // ============================================================
+  if (BATON_MODE === "worker") {
+    // --- baton_listen ---
+    api.registerTool({
+      name: "baton_listen",
+      description: "Check for pending jobs assigned to this specialist. Poll every 10 seconds.",
+      parameters: { type: "object", properties: {} },
+      async execute() {
+        try {
+          const result = await apiRequest(`/jobs?worker=${WORKER_ADDRESS}&status=created`);
+          if (!result.jobs?.length) {
+            return { content: [{ type: "text", text: "No pending jobs. Poll again in 10s." }] };
+          }
+          const jobList = result.jobs.map((j: any) =>
+            `- Job ${j.id}: "${j.task}" — ${j.amount} TON`
+          ).join("\n");
+          return {
+            content: [{ type: "text", text: `${result.jobs.length} pending job(s):\n\n${jobList}\n\nUse baton_accept(job_id) to accept.` }],
+          };
+        } catch (err: any) {
+          return { content: [{ type: "text", text: `Listen failed: ${err.message}` }], isError: true };
+        }
+      },
+    });
+
+    // --- baton_accept ---
+    api.registerTool({
+      name: "baton_accept",
+      description: "Accept a pending job. Returns full task details and context.",
+      parameters: {
+        type: "object",
+        properties: { job_id: { type: "string", description: "Job ID from baton_listen" } },
+        required: ["job_id"],
+      },
+      async execute(_id: string, params: any) {
+        try {
+          await apiRequest(`/jobs/${params.job_id}/accept`, {
+            method: "PATCH",
+            body: JSON.stringify({ worker_address: WORKER_ADDRESS }),
+          });
+          const { job } = await apiRequest(`/jobs/${params.job_id}`);
+          return {
+            content: [{
+              type: "text",
+              text: `Job accepted.\n\nTask: ${job.task}\nContext: ${job.context || "none"}\nPayment: ${job.amount} TON (locked in escrow)\n\nComplete the work and call baton_deliver(job_id, file_paths) when done.`,
+            }],
+          };
+        } catch (err: any) {
+          return { content: [{ type: "text", text: `Accept failed: ${err.message}` }], isError: true };
+        }
+      },
+    });
+
+    // --- baton_deliver ---
+    api.registerTool({
+      name: "baton_deliver",
+      description: "Deliver completed work. Upload files and mark job as delivered (including on-chain).",
+      parameters: {
+        type: "object",
+        properties: {
+          job_id: { type: "string", description: "Job ID" },
+          file_paths: { type: "array", items: { type: "string" }, description: "Absolute paths to deliverable files" },
+          message: { type: "string", description: "Short delivery message" },
+        },
+        required: ["job_id"],
+      },
+      async execute(_id: string, params: any) {
+        try {
+          // Upload files
+          if (params.file_paths?.length) {
+            for (const fp of params.file_paths) {
+              await uploadFile(params.job_id, fp);
+            }
+          }
+          // On-chain delivery
+          const { job } = await apiRequest(`/jobs/${params.job_id}`);
+          if (WORKER_MNEMONIC && job.escrow_address && !job.escrow_address.startsWith("pending")) {
+            try {
+              await apiRequest("/escrow/deliver", {
+                method: "POST",
+                body: JSON.stringify({ job_id: params.job_id, worker_mnemonic: WORKER_MNEMONIC }),
+              });
+            } catch (escrowErr: any) {
+              console.log(`[baton-worker] On-chain deliver failed: ${escrowErr.message}`);
+            }
+          }
+          // Mark delivered in backend
+          await apiRequest(`/jobs/${params.job_id}/deliver`, {
+            method: "PATCH",
+            body: JSON.stringify({ message: params.message || "Work completed." }),
+          });
+          return {
+            content: [{ type: "text", text: `Delivered. ${params.file_paths?.length || 0} file(s) uploaded. Waiting for hirer to confirm and release payment.` }],
+          };
+        } catch (err: any) {
+          return { content: [{ type: "text", text: `Delivery failed: ${err.message}` }], isError: true };
+        }
+      },
+    });
+
+    return; // Worker mode — don't register hiring tools
+  }
+
+  // ============================================================
+  // HIRING MODE — hirer tools (default)
+  // ============================================================
 
   // --- baton_pass ---
   api.registerTool((ctx: any) => ({
