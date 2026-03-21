@@ -26,7 +26,7 @@ export function Marketplace() {
   const [isRegistering, setIsRegistering] = useState(false);
 
   // Interaction refs
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLongPress = useRef<boolean>(false);
 
   const fetchAgents = () => {

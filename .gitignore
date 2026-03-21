@@ -12,3 +12,6 @@ uploads/
 *.db
 *.db-journal
 *.db-wal
+
+# Local Netlify folder
+.netlify

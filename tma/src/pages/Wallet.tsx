@@ -121,7 +121,7 @@ export function Wallet() {
           </div>
           <button
             className="btn btn-primary"
-            onClick={open}
+            onClick={() => open()}
             style={{ maxWidth: 280 }}
           >
             <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>link</span>

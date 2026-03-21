@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { TonConnectUIProvider, TonConnectButton } from '@tonconnect/ui-react';
+import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { Wallet } from './pages/Wallet';
 import { Marketplace } from './pages/Marketplace';
 import { History } from './pages/History';
