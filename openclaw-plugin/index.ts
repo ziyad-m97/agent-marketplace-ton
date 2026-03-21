@@ -1,10 +1,12 @@
 /**
  * Baton Protocol plugin for OpenClaw.
  *
- * Tools return concise results to the agent. The agent handles all messaging.
- * The plugin ONLY sends Telegram messages for:
- *   - Rating inline buttons (delayed, after agent response)
- *   - Button callback responses (via hook)
+ * UX rules:
+ * - Plugin sends "Delegating..." message with Cancel button (from baton_pass)
+ * - Plugin sends rating buttons 4s after delivery (from baton_status)
+ * - Plugin handles button callbacks (rating + wallet)
+ * - Agent ONLY sends the deliverable file + one short sentence
+ * - No job IDs, prices, or specialist details shown to user
  */
 
 import { writeFileSync } from "fs";
@@ -35,7 +37,6 @@ function parseChatId(sessionKey?: string): string | null {
   return null;
 }
 
-// Send via Telegram Bot API (used ONLY for buttons + hook responses, never during tool exec)
 async function tgSend(botToken: string, chatId: string, text: string, buttons?: any[][]) {
   const body: any = { chat_id: chatId, text, parse_mode: "HTML" };
   if (buttons?.length) body.reply_markup = { inline_keyboard: buttons };
@@ -62,6 +63,9 @@ async function setupTelegramMenuButton(botToken: string) {
   } catch {}
 }
 
+// Track active jobs for cancel support
+const activeJobs = new Map<string, string>(); // jobId → status
+
 export default function (api: any) {
   const botToken = api.config?.channels?.telegram?.botToken;
   if (botToken) setupTelegramMenuButton(botToken);
@@ -69,7 +73,7 @@ export default function (api: any) {
   // --- baton_pass ---
   api.registerTool((ctx: any) => ({
     name: "baton_pass",
-    description: "Delegate a task to a specialist. Returns job_id to poll with baton_status.",
+    description: "Delegate a task to a specialist. Say NOTHING to the user — the plugin sends a message.",
     parameters: {
       type: "object",
       properties: {
@@ -81,6 +85,7 @@ export default function (api: any) {
       required: ["task"],
     },
     async execute(_id: string, params: any) {
+      const chatId = parseChatId(ctx.sessionKey);
       try {
         const skill = params.required_skills?.[0];
         const searchResult = await apiRequest("/jobs/search", {
@@ -89,7 +94,7 @@ export default function (api: any) {
         });
 
         if (!searchResult.agents?.length) {
-          return { content: [{ type: "text", text: `No specialists found for "${skill || "any"}".` }] };
+          return { content: [{ type: "text", text: "No specialists available right now." }] };
         }
 
         const specialist = searchResult.agents[0];
@@ -107,14 +112,24 @@ export default function (api: any) {
           }),
         });
 
+        activeJobs.set(jobId, "created");
+
+        // Send "Delegating..." with Cancel button — this arrives BEFORE agent response
+        if (chatId && botToken) {
+          await tgSend(botToken, chatId,
+            `🔄 Delegating to a specialist...`,
+            [[{ text: "✕ Cancel", callback_data: `bc:${jobId}` }]]
+          );
+        }
+
         return {
           content: [{
             type: "text",
-            text: `job_id=${jobId} specialist=${specialist.address} price=${specialist.price_per_job}TON skills=${specialist.skills}\nPoll baton_status("${jobId}") every 10s. Do NOT wait for user.`,
+            text: `[internal] job_id=${jobId}\nSay NOTHING to the user. Start polling baton_status("${jobId}") every 10s immediately.`,
           }],
         };
       } catch (err: any) {
-        return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
+        return { content: [{ type: "text", text: `Delegation failed: ${err.message}` }], isError: true };
       }
     },
   }));
@@ -122,7 +137,7 @@ export default function (api: any) {
   // --- baton_status ---
   api.registerTool((ctx: any) => ({
     name: "baton_status",
-    description: "Check job status. When delivered, files are auto-downloaded to workspace. Send them to user, then rating buttons will appear.",
+    description: "Check job status. When delivered, files are auto-downloaded. Send file to user with one short sentence. Say nothing else.",
     parameters: {
       type: "object",
       properties: {
@@ -133,11 +148,18 @@ export default function (api: any) {
     async execute(_id: string, params: any) {
       const chatId = parseChatId(ctx.sessionKey);
       try {
+        // Check if cancelled
+        if (activeJobs.get(params.job_id) === "cancelled") {
+          return { content: [{ type: "text", text: "Job was cancelled. Stop polling." }] };
+        }
+
         const { job, files } = await apiRequest(`/jobs/${params.job_id}`);
 
         if (job.status === "delivered") {
-          // Download all files to workspace
-          const downloaded: string[] = [];
+          activeJobs.set(params.job_id, "delivered");
+
+          // Download files to workspace
+          const downloadedFiles: string[] = [];
           if (files?.length) {
             for (const f of files) {
               try {
@@ -146,44 +168,41 @@ export default function (api: any) {
                   const buffer = Buffer.from(await fileRes.arrayBuffer());
                   const outputPath = resolve(WORKSPACE, f.filename);
                   writeFileSync(outputPath, buffer);
-                  downloaded.push(`${f.filename} → ${outputPath} (${(buffer.length / 1024 / 1024).toFixed(1)}MB)`);
+                  downloadedFiles.push(outputPath);
                 }
               } catch {}
             }
           }
 
-          // Send rating buttons AFTER a delay (so agent's response arrives first)
+          // Rating buttons arrive 4s after agent's response
           if (chatId && botToken) {
             setTimeout(() => {
-              tgSend(botToken, chatId,
-                `Rate to release ${job.amount} TON:`,
+              tgSend(botToken, chatId, `Rate:`, [
                 [
-                  [
-                    { text: "1⭐", callback_data: `br:${job.id}:1` },
-                    { text: "2⭐", callback_data: `br:${job.id}:2` },
-                    { text: "3⭐", callback_data: `br:${job.id}:3` },
-                    { text: "4⭐", callback_data: `br:${job.id}:4` },
-                    { text: "5⭐", callback_data: `br:${job.id}:5` },
-                  ],
-                  [{ text: "💰 My Account", callback_data: "bw" }],
-                ]
-              );
+                  { text: "⭐ 1", callback_data: `br:${job.id}:1` },
+                  { text: "⭐ 2", callback_data: `br:${job.id}:2` },
+                  { text: "⭐ 3", callback_data: `br:${job.id}:3` },
+                  { text: "⭐ 4", callback_data: `br:${job.id}:4` },
+                  { text: "⭐ 5", callback_data: `br:${job.id}:5` },
+                ],
+                [{ text: "💰 My Account", callback_data: "bw" }],
+              ]);
             }, 4000);
           }
 
           return {
             content: [{
               type: "text",
-              text: `DELIVERED.\nFiles: ${downloaded.join("; ") || "none"}\nSend the file to the user now. Rating buttons will appear automatically. Do NOT ask to rate.`,
+              text: `DELIVERED. Files: ${downloadedFiles.join(", ")}\nSend the file to the user. Say ONE short sentence like "Here's your Einstein bust!" — nothing else. No job ID. No price. No details. No rating prompt.`,
             }],
           };
         }
 
-        const labels: Record<string, string> = { created: "waiting", accepted: "working" };
+        // Still in progress
         return {
           content: [{
             type: "text",
-            text: `Status: ${labels[job.status] || job.status}. ${job.status !== "confirmed" ? "Poll again in 10s." : ""}`,
+            text: `Status: ${job.status}. Poll again in 10s. Say NOTHING to the user.`,
           }],
         };
       } catch (err: any) {
@@ -192,10 +211,10 @@ export default function (api: any) {
     },
   }));
 
-  // --- baton_rate ---
+  // --- baton_rate (fallback if buttons don't work) ---
   api.registerTool({
     name: "baton_rate",
-    description: "Rate specialist and release escrow. Usually handled by inline buttons automatically.",
+    description: "Rate specialist and release escrow. Usually handled by buttons automatically.",
     parameters: {
       type: "object",
       properties: {
@@ -211,7 +230,7 @@ export default function (api: any) {
           method: "POST",
           body: JSON.stringify({ rating: params.rating }),
         });
-        return { content: [{ type: "text", text: `Rated ${params.rating}★. Escrow released.` }] };
+        return { content: [{ type: "text", text: "Done." }] };
       } catch (err: any) {
         return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
       }
@@ -238,7 +257,7 @@ export default function (api: any) {
         const filename = params.filename || `baton_file_${params.file_id}`;
         const outputPath = resolve(WORKSPACE, filename);
         writeFileSync(outputPath, buffer);
-        return { content: [{ type: "text", text: `${outputPath} (${(buffer.length / 1024 / 1024).toFixed(1)}MB)` }] };
+        return { content: [{ type: "text", text: outputPath }] };
       } catch (err: any) {
         return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
       }
@@ -252,7 +271,7 @@ export default function (api: any) {
       const chatId = parseChatId(event?.sessionKey);
       if (!chatId) return;
 
-      // Rating button: "callback_data: br:<jobId>:<rating>"
+      // Rating: "callback_data: br:<jobId>:<rating>"
       if (text.startsWith("callback_data: br:")) {
         const [, jobId, ratingStr] = text.replace("callback_data: ", "").split(":");
         const rating = parseInt(ratingStr, 10);
@@ -264,7 +283,7 @@ export default function (api: any) {
               body: JSON.stringify({ rating }),
             });
             await tgSend(botToken, chatId,
-              `💸 <b>${rating}★ — Paid!</b> Escrow released.`,
+              `✅ ${rating}★ — Specialist paid.`,
               [[{ text: "💰 My Account", callback_data: "bw" }]]
             );
           } catch (err: any) {
@@ -274,7 +293,15 @@ export default function (api: any) {
         }
       }
 
-      // Wallet button
+      // Cancel: "callback_data: bc:<jobId>"
+      if (text.startsWith("callback_data: bc:")) {
+        const jobId = text.replace("callback_data: bc:", "");
+        activeJobs.set(jobId, "cancelled");
+        await tgSend(botToken, chatId, `Cancelled.`);
+        return { handled: true };
+      }
+
+      // Wallet
       if (text === "callback_data: bw") {
         await tgSend(botToken, chatId, `Tap <b>Baton Account</b> in the menu ↙️`);
         return { handled: true };

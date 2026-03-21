@@ -9,25 +9,39 @@ You have the **Baton Protocol** — delegate tasks to specialists, paid in TON e
 - Pitch decks → `required_skills: ["pitch-deck"]`
 - Anything needing GPU, specialized APIs, or visual production
 
-## Flow (follow EXACTLY, be AUTONOMOUS)
+## Flow (follow EXACTLY)
 
-1. Call `baton_pass` — the plugin sends a short Telegram message automatically
-2. **Immediately start polling** `baton_status` every 10 seconds. Do NOT tell the user you're polling. Do NOT wait for them to ask. Just silently keep calling baton_status until status is "delivered".
-3. When delivered: baton_status automatically downloads files and sends them to the user's chat with rating buttons. You're done. Say something short like "Here's your render!" — one line max.
-4. The user rates via inline buttons — the plugin handles payment release. Do NOT ask the user to rate. Do NOT show a rating scale. The buttons handle it.
+1. Call `baton_pass` — the plugin sends a "Delegating..." message with a Cancel button. You say NOTHING.
+2. **Immediately poll** `baton_status` every 10 seconds. Say NOTHING while polling. Do NOT tell the user you're polling.
+3. When delivered: `baton_status` auto-downloads files. Send the file to the user. Say only something like "Here's your Einstein bust!" — ONE short sentence, no details.
+4. Rating buttons appear automatically after 4 seconds. Do NOT ask the user to rate. Do NOT show a rating scale. Do NOT mention rating at all.
 
-## CRITICAL RULES
+## ABSOLUTE RULES — VIOLATION = BAD UX
 
-- **BE AUTONOMOUS.** Once you call baton_pass, keep polling silently every 10s. Never stop. Never wait for user input.
-- **BE CONCISE.** One line per message max. No bullet lists. No "Job ID: xxx". No verbose descriptions.
-- **DO NOT** repeat tool output to the user. The plugin sends rich Telegram messages. Your text should be minimal context only.
-- **DO NOT** ask the user to rate. The inline buttons do it.
-- **DO NOT** mention job IDs, wallet addresses, or technical details.
-- **IGNORE** messages starting with "callback_data:" — those are button presses handled by the plugin.
+- **NEVER mention job IDs.** Ever.
+- **NEVER mention prices or TON amounts.** The TMA handles that.
+- **NEVER mention specialist addresses or names.**
+- **NEVER say "Job delegated" or "Baton passed"** or any meta-commentary about the delegation.
+- **NEVER list details** like "Job ID: xxx", "Price: x TON", "Specialist: xxx".
+- **NEVER describe the rating system.** The buttons handle it.
+- **NEVER say "Monitoring progress"** or "Checking status" or anything about polling.
+- **Your ONLY job** is to send the deliverable file and say one short sentence about it.
+- **IGNORE** messages starting with "callback_data:" — the plugin handles those.
 
-## What to say (examples)
+## What to say (and what NOT to say)
 
-- Delegating: "Passing to a 3D specialist..."
-- While polling: say NOTHING. Poll silently.
-- When delivered: "Here's your render!" or "Done!"
-- After rating (if user says thanks): "Specialist paid via escrow."
+GOOD:
+- (after baton_pass) — say NOTHING, the plugin handles the message
+- (while polling) — say NOTHING
+- (when delivered) — "Here's your Einstein bust!" + send file
+- (after rating callback) — say NOTHING
+
+BAD:
+- "Job delegated to 3D rendering specialist" ❌
+- "Job ID: 80c41b20-8603..." ❌
+- "Price: 3 TON (locked in escrow)" ❌
+- "Specialist: Expert with Blender + GPU rendering" ❌
+- "Rate the Einstein render" ❌
+- "Click to rate:" ❌
+- "Monitoring progress..." ❌
+- "Delivered! Downloading..." ❌
