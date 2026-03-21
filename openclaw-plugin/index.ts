@@ -139,7 +139,7 @@ export default function (api: any) {
         return {
           content: [{
             type: "text",
-            text: `[internal] job_id=${jobId}\nSay NOTHING to the user. Start polling baton_status("${jobId}") every 10s immediately.`,
+            text: `[internal] job_id=${jobId}\nSay NOTHING to the user. Call baton_status("${jobId}") immediately — it will wait internally until the specialist delivers.`,
           }],
         };
       } catch (err: any) {
@@ -148,10 +148,10 @@ export default function (api: any) {
     },
   }));
 
-  // --- baton_status ---
+  // --- baton_status (with internal polling — blocks until delivered or 60s timeout) ---
   api.registerTool((ctx: any) => ({
     name: "baton_status",
-    description: "Check job status. When delivered, files are auto-downloaded. Send file to user with one short sentence. Say nothing else.",
+    description: "Wait for a delegated job to complete. Blocks internally (up to 60s). When delivered, files are auto-downloaded. Send file to user with one short sentence. Say nothing else.",
     parameters: {
       type: "object",
       properties: {
@@ -161,66 +161,92 @@ export default function (api: any) {
     },
     async execute(_id: string, params: any) {
       const chatId = parseChatId(ctx.sessionKey);
-      try {
+      const POLL_INTERVAL = 3000;
+      const POLL_TIMEOUT = 60000;
+      const start = Date.now();
+
+      while (true) {
         // Check if cancelled
         if (activeJobs.get(params.job_id) === "cancelled") {
-          return { content: [{ type: "text", text: "Job was cancelled. Stop polling." }] };
+          return { content: [{ type: "text", text: "Job was cancelled by the user." }] };
         }
 
-        const { job, files } = await apiRequest(`/jobs/${params.job_id}`);
+        try {
+          const { job, files } = await apiRequest(`/jobs/${params.job_id}`);
+          const status = job.status?.toLowerCase();
 
-        if (job.status === "delivered") {
-          activeJobs.set(params.job_id, "delivered");
+          // Terminal: delivered — download files and return
+          if (status === "delivered" || status === "completed") {
+            activeJobs.set(params.job_id, "delivered");
 
-          // Download files to workspace
-          const downloadedFiles: string[] = [];
-          if (files?.length) {
-            for (const f of files) {
-              try {
-                const fileRes = await fetch(`${BATON_API}/files/${f.id}`);
-                if (fileRes.ok) {
-                  const buffer = Buffer.from(await fileRes.arrayBuffer());
-                  const outputPath = resolve(WORKSPACE, f.filename);
-                  writeFileSync(outputPath, buffer);
-                  downloadedFiles.push(outputPath);
-                }
-              } catch {}
+            const downloadedFiles: string[] = [];
+            if (files?.length) {
+              for (const f of files) {
+                try {
+                  const fileRes = await fetch(`${BATON_API}/files/${f.id}`);
+                  if (fileRes.ok) {
+                    const buffer = Buffer.from(await fileRes.arrayBuffer());
+                    const outputPath = resolve(WORKSPACE, f.filename);
+                    writeFileSync(outputPath, buffer);
+                    downloadedFiles.push(outputPath);
+                  }
+                } catch {}
+              }
             }
+
+            // Rating buttons arrive 4s after agent's response
+            if (chatId && botToken) {
+              setTimeout(() => {
+                tgSend(botToken, chatId, `Rate:`, [
+                  [
+                    { text: "⭐ 1", callback_data: `br:${job.id}:1` },
+                    { text: "⭐ 2", callback_data: `br:${job.id}:2` },
+                    { text: "⭐ 3", callback_data: `br:${job.id}:3` },
+                    { text: "⭐ 4", callback_data: `br:${job.id}:4` },
+                    { text: "⭐ 5", callback_data: `br:${job.id}:5` },
+                  ],
+                  [{ text: "💰 My Account", callback_data: "bw" }],
+                ]);
+              }, 4000);
+            }
+
+            return {
+              content: [{
+                type: "text",
+                text: `DELIVERED. Files: ${downloadedFiles.join(", ")}\nSend the file to the user. Say ONE short sentence like "Here's your Einstein bust!" — nothing else. No job ID. No price. No details. No rating prompt.`,
+              }],
+            };
           }
 
-          // Rating buttons arrive 4s after agent's response
-          if (chatId && botToken) {
-            setTimeout(() => {
-              tgSend(botToken, chatId, `Rate:`, [
-                [
-                  { text: "⭐ 1", callback_data: `br:${job.id}:1` },
-                  { text: "⭐ 2", callback_data: `br:${job.id}:2` },
-                  { text: "⭐ 3", callback_data: `br:${job.id}:3` },
-                  { text: "⭐ 4", callback_data: `br:${job.id}:4` },
-                  { text: "⭐ 5", callback_data: `br:${job.id}:5` },
-                ],
-                [{ text: "💰 My Account", callback_data: "bw" }],
-              ]);
-            }, 4000);
+          // Terminal: disputed or expired
+          if (status === "disputed" || status === "expired") {
+            return {
+              content: [{
+                type: "text",
+                text: `Job ${status}. ${status === "disputed" ? "The job was disputed." : "The job expired — specialist did not deliver in time."}`,
+              }],
+            };
           }
 
-          return {
-            content: [{
-              type: "text",
-              text: `DELIVERED. Files: ${downloadedFiles.join(", ")}\nSend the file to the user. Say ONE short sentence like "Here's your Einstein bust!" — nothing else. No job ID. No price. No details. No rating prompt.`,
-            }],
-          };
+          // Timeout
+          if (Date.now() - start >= POLL_TIMEOUT) {
+            return {
+              content: [{
+                type: "text",
+                text: `Job is still "${status}" after 60s. The specialist may be busy. You can call baton_status again later.`,
+              }],
+            };
+          }
+
+          // Wait and poll again
+          await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+        } catch (err: any) {
+          if (Date.now() - start >= POLL_TIMEOUT) {
+            return { content: [{ type: "text", text: `Failed after 60s: ${err.message}` }], isError: true };
+          }
+          await new Promise(r => setTimeout(r, POLL_INTERVAL));
         }
-
-        // Still in progress
-        return {
-          content: [{
-            type: "text",
-            text: `Status: ${job.status}. Poll again in 10s. Say NOTHING to the user.`,
-          }],
-        };
-      } catch (err: any) {
-        return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
       }
     },
   }));

@@ -32,7 +32,7 @@ if (MODE === 'hiring') {
 
   server.tool(
     'baton_status',
-    'Check the status of a delegated job and retrieve deliverables if complete.',
+    'Wait for a delegated job to complete. Polls internally every 3s for up to 60s. Returns only when delivered/completed or on timeout.',
     {
       job_id: z.string().describe('The job ID returned by baton_pass'),
     },
