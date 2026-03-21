@@ -21,6 +21,15 @@ const STATUS_BADGE: Record<string, string> = {
   expired: 'badge-danger',
 };
 
+const STATUS_ICON: Record<string, string> = {
+  created: 'schedule',
+  accepted: 'handshake',
+  delivered: 'inventory',
+  completed: 'check_circle',
+  disputed: 'gavel',
+  expired: 'timer_off',
+};
+
 export function History() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,45 +45,59 @@ export function History() {
   }, []);
 
   if (loading) {
-    return <div className="empty">Loading jobs...</div>;
+    return <div className="empty"><p>Loading jobs...</p></div>;
   }
 
   if (jobs.length === 0) {
     return (
       <div className="empty">
         <p>No delegations yet</p>
-        <p style={{ fontSize: 12, marginTop: 8 }}>Jobs will appear here when your agent passes the baton</p>
+        <p style={{ fontSize: 13, marginTop: 12, color: 'var(--on-surface-variant)' }}>
+          Jobs will appear here when your agent passes the baton
+        </p>
       </div>
     );
   }
 
   return (
     <div>
-      <h2 style={{ fontSize: 16, marginBottom: 16 }}>Job History</h2>
+      <h2 className="page-title">Job History</h2>
 
-      {jobs.map(job => (
-        <div className="card job-item" key={job.id}>
-          <div>
-            <div className="job-task">{job.task}</div>
-            <div className="job-meta">
-              @{job.worker_address} · {new Date(job.created_at).toLocaleDateString()}
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <span className={`badge ${STATUS_BADGE[job.status] || 'badge-info'}`}>
-              {job.status}
-            </span>
-            <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4 }}>
-              {job.amount} TON
-            </div>
-            {job.rating && (
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                {'★'.repeat(job.rating)}
+      <div className="space-y-sm">
+        {jobs.map(job => (
+          <div className="job-item" key={job.id}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+              <div className="tx-icon">
+                <span
+                  className="material-symbols-outlined"
+                  style={{ color: 'var(--primary)', fontSize: 20 }}
+                >
+                  {STATUS_ICON[job.status] || 'help'}
+                </span>
               </div>
-            )}
+              <div>
+                <div className="job-task">{job.task}</div>
+                <div className="job-meta">
+                  @{job.worker_address} · {new Date(job.created_at).toLocaleDateString()}
+                </div>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+              <span className={`badge ${STATUS_BADGE[job.status] || 'badge-info'}`}>
+                {job.status}
+              </span>
+              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 700, marginTop: 6 }}>
+                {job.amount} TON
+              </div>
+              {job.rating && (
+                <div style={{ fontSize: 12, color: 'var(--tertiary)', marginTop: 2 }}>
+                  {'★'.repeat(job.rating)}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

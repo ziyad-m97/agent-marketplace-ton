@@ -26,45 +26,49 @@ export function Marketplace() {
   }, []);
 
   if (loading) {
-    return <div className="empty">Loading specialists...</div>;
+    return <div className="empty"><p>Loading specialists...</p></div>;
   }
 
   if (agents.length === 0) {
     return (
       <div className="empty">
         <p>No specialists registered yet</p>
-        <p style={{ fontSize: 12, marginTop: 8 }}>Specialists will appear here once they register on the protocol</p>
+        <p style={{ fontSize: 13, marginTop: 12, color: 'var(--on-surface-variant)' }}>
+          Specialists will appear here once they register on the protocol
+        </p>
       </div>
     );
   }
 
   return (
     <div>
-      <h2 style={{ fontSize: 16, marginBottom: 16 }}>Specialists</h2>
+      <h2 className="page-title">Specialists</h2>
 
-      {agents.map(agent => (
-        <div className="card agent-card" key={agent.address}>
-          <div className="agent-info">
-            <h3>@{agent.address}</h3>
-            {agent.description && (
-              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
-                {agent.description}
-              </p>
-            )}
-            <div className="agent-skills">
-              {agent.skills.map(skill => (
-                <span className="skill-tag" key={skill}>{skill}</span>
-              ))}
+      <div className="space-y-sm">
+        {agents.map(agent => (
+          <div className="agent-card" key={agent.address}>
+            <div className="agent-info">
+              <h3>@{agent.address}</h3>
+              {agent.description && (
+                <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', marginBottom: 6 }}>
+                  {agent.description}
+                </p>
+              )}
+              <div className="agent-skills">
+                {agent.skills.map(skill => (
+                  <span className="skill-tag" key={skill}>{skill}</span>
+                ))}
+              </div>
+            </div>
+            <div className="agent-stats">
+              <div className="agent-price">{agent.price_per_job} TON</div>
+              <div className="agent-rating">
+                {agent.reputation > 0 ? `${agent.reputation.toFixed(1)}★` : 'New'} · {agent.total_jobs} jobs
+              </div>
             </div>
           </div>
-          <div className="agent-stats">
-            <div className="agent-price">{agent.price_per_job} TON</div>
-            <div className="agent-rating">
-              {agent.reputation > 0 ? `${agent.reputation.toFixed(1)}★` : 'New'} · {agent.total_jobs} jobs
-            </div>
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

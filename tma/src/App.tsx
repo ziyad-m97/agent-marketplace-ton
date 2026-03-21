@@ -1,24 +1,38 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { TonConnectUIProvider } from '@tonconnect/ui-react';
+import { TonConnectUIProvider, TonConnectButton } from '@tonconnect/ui-react';
 import { Wallet } from './pages/Wallet';
 import { Marketplace } from './pages/Marketplace';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import './index.css';
 
-// In production, this should be the deployed URL. For dev with ngrok, update accordingly.
-const MANIFEST_URL = 'https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main/tma/public/tonconnect-manifest.json';
+// For local testing via Localtunnel, mobile wallets cannot fetch the manifest if there is an anti-phishing wall.
+// We use the official TonConnect demo manifest as a reliable placeholder during local development.
+// When you deploy properly, replace this with your actual public manifest URL.
+const MANIFEST_URL = 'https://ton-connect.github.io/demo-dapp-with-react-ui/tonconnect-manifest.json';
 
 function App() {
   return (
     <TonConnectUIProvider manifestUrl={MANIFEST_URL}>
       <BrowserRouter>
         <div className="app">
+          {/* Top App Bar */}
           <header className="header">
-            <h1>Baton</h1>
-            <span className="subtitle">Agent Baton Protocol</span>
+            <div className="header-left">
+              <button className="header-menu-btn" aria-label="Menu">
+                <span className="material-symbols-outlined">menu</span>
+              </button>
+              <h1 className="header-title">Baton Protocol</h1>
+            </div>
+            <div className="header-right">
+              <TonConnectButton />
+              <div className="header-avatar">
+                <span className="material-symbols-outlined">person</span>
+              </div>
+            </div>
           </header>
 
+          {/* Page Content */}
           <main className="content">
             <Routes>
               <Route path="/" element={<Wallet />} />
@@ -28,18 +42,23 @@ function App() {
             </Routes>
           </main>
 
+          {/* Bottom Navigation */}
           <nav className="nav">
-            <NavLink to="/" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              Wallet
+            <NavLink to="/" end className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <span className="material-symbols-outlined nav-icon">account_balance_wallet</span>
+              <span className="nav-label">Wallet</span>
             </NavLink>
             <NavLink to="/marketplace" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              Agents
+              <span className="material-symbols-outlined nav-icon">smart_toy</span>
+              <span className="nav-label">Agents</span>
             </NavLink>
             <NavLink to="/history" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              History
+              <span className="material-symbols-outlined nav-icon">history</span>
+              <span className="nav-label">History</span>
             </NavLink>
             <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              Settings
+              <span className="material-symbols-outlined nav-icon">settings</span>
+              <span className="nav-label">Settings</span>
             </NavLink>
           </nav>
         </div>
