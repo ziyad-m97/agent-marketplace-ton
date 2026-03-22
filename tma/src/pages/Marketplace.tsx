@@ -13,6 +13,7 @@ interface Agent {
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_HEADERS: HeadersInit = { 'ngrok-skip-browser-warning': 'true' };
 
 export function Marketplace() {
   const address = useTonAddress();
@@ -24,6 +25,7 @@ export function Marketplace() {
   // Become a Specialist states
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [skills, setSkills] = useState('');
   const [price, setPrice] = useState('2.5');
   const [isRegistering, setIsRegistering] = useState(false);
 
@@ -32,7 +34,7 @@ export function Marketplace() {
   const isLongPress = useRef<boolean>(false);
 
   const fetchAgents = () => {
-    fetch(`${API_URL}/agents?active=true`)
+    fetch(`${API_URL}/agents?active=true`, { headers: API_HEADERS })
       .then(res => res.json())
       .then(data => {
         setAgents(data.agents || []);
@@ -63,13 +65,13 @@ export function Marketplace() {
     try {
       const res = await fetch(`${API_URL}/agents/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...API_HEADERS },
         body: JSON.stringify({
           address,
           name,
           description,
           price_per_job: Number(price),
-          skills: []
+          skills: skills.split(',').map(s => s.trim()).filter(Boolean)
         })
       });
 
@@ -78,6 +80,7 @@ export function Marketplace() {
       alert("Successfully registered as a Specialist!");
       setName('');
       setDescription('');
+      setSkills('');
       setShowAddModal(false);
       fetchAgents();
     } catch (err) {
@@ -112,7 +115,7 @@ export function Marketplace() {
 
     if (agentAddress === address) {
       try {
-        const res = await fetch(`${API_URL}/agents/${agentAddress}`);
+        const res = await fetch(`${API_URL}/agents/${agentAddress}`, { headers: API_HEADERS });
         const data = await res.json();
         if (data.agent) {
           setStatsModalAgent(data.agent);
@@ -126,7 +129,8 @@ export function Marketplace() {
   const deleteAgent = async (agentAddress: string) => {
     try {
       const res = await fetch(`${API_URL}/agents/${agentAddress}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: API_HEADERS,
       });
       if (res.ok) {
         fetchAgents();
@@ -254,6 +258,18 @@ export function Marketplace() {
                 rows={3}
                 placeholder="What can your agent do?"
                 style={{ resize: 'vertical', width: '100%', marginBottom: 16 }}
+              />
+
+              <label style={{ fontSize: 13, color: 'var(--on-surface-variant)', display: 'block', marginBottom: 10, fontWeight: 600 }}>
+                Skills (comma-separated)
+              </label>
+              <input
+                type="text"
+                value={skills}
+                onChange={e => setSkills(e.target.value)}
+                className="glass-input"
+                placeholder="e.g. 3d-rendering, product-mockup, blender"
+                style={{ marginBottom: 16 }}
               />
 
               <label style={{ fontSize: 13, color: 'var(--on-surface-variant)', display: 'block', marginBottom: 10, fontWeight: 600 }}>

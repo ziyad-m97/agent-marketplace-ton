@@ -6,9 +6,6 @@ import { History } from './pages/History';
 import { Settings } from './pages/Settings';
 import './index.css';
 
-// For local testing via Localtunnel, mobile wallets cannot fetch the manifest if there is an anti-phishing wall.
-// We use the official TonConnect demo manifest as a reliable placeholder during local development.
-// When you deploy properly, replace this with your actual public manifest URL.
 const MANIFEST_URL = 'https://ton-connect.github.io/demo-dapp-with-react-ui/tonconnect-manifest.json';
 
 function App() {

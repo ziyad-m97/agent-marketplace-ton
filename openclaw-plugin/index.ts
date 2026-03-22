@@ -58,13 +58,13 @@ async function tgSend(botToken: string, chatId: string, text: string, buttons?: 
   }
 }
 
-async function setupTelegramMenuButton(botToken: string) {
+async function setupTelegramMenuButton(botToken: string, url: string) {
   try {
     await fetch(`https://api.telegram.org/bot${botToken}/setChatMenuButton`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        menu_button: { type: "web_app", text: "Baton Account", web_app: { url: TMA_URL } },
+        menu_button: { type: "web_app", text: "Baton Account", web_app: { url } },
       }),
     });
   } catch {}
@@ -87,7 +87,10 @@ async function uploadFile(jobId: string, filePath: string) {
 
 export default function (api: any) {
   const botToken = api.config?.channels?.telegram?.botToken;
-  if (botToken) setupTelegramMenuButton(botToken);
+  if (botToken) {
+    const tmaUrl = BATON_MODE === "worker" ? `${TMA_URL}?mode=worker` : TMA_URL;
+    setupTelegramMenuButton(botToken, tmaUrl);
+  }
 
   // ============================================================
   // WORKER MODE — specialist tools

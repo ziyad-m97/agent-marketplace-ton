@@ -12,6 +12,7 @@ interface Job {
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_HEADERS: HeadersInit = { 'ngrok-skip-browser-warning': 'true' };
 
 const STATUS_BADGE: Record<string, string> = {
   created: 'badge-info',
@@ -36,7 +37,7 @@ export function History() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_URL}/jobs`)
+    fetch(`${API_URL}/jobs`, { headers: API_HEADERS })
       .then(res => res.json())
       .then(data => {
         setJobs(data.jobs || []);
