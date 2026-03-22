@@ -1,6 +1,6 @@
 import { Address, toNano } from '@ton/core';
 import { Sender } from '@ton/core';
-import { Escrow } from '../../../contracts/build/Escrow/tact_Escrow';
+import { Escrow } from './tact_Escrow';
 import { getClient, getSender, getWalletAddress } from './wallet';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));

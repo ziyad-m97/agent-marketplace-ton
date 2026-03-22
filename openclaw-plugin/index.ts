@@ -396,15 +396,17 @@ export default function (api: any) {
     },
     async execute(_id: string, params: any) {
       try {
-        // Confirm escrow on-chain (releases TON to specialist)
+        // Try to confirm escrow on-chain (releases TON to specialist)
         try {
           await apiRequest(`/escrow/confirm`, {
             method: "POST",
             body: JSON.stringify({ job_id: params.job_id }),
           });
         } catch (escrowErr: any) {
-          console.log(`[baton] On-chain confirm failed: ${escrowErr.message} — falling back`);
-          await apiRequest(`/jobs/${params.job_id}/confirm`, { method: "PATCH" });
+          console.log(`[baton] On-chain confirm skipped: ${escrowErr.message}`);
+          try {
+            await apiRequest(`/jobs/${params.job_id}/confirm`, { method: "PATCH" });
+          } catch { /* already completed */ }
         }
         await apiRequest(`/jobs/${params.job_id}/rate`, {
           method: "POST",
@@ -458,15 +460,18 @@ export default function (api: any) {
         if (jobId && rating >= 1 && rating <= 5) {
           try {
             await tgSend(botToken, chatId, `⏳ Releasing payment on-chain...`);
-            // Confirm escrow on-chain (releases TON to specialist)
+            // Try to confirm escrow on-chain (releases TON to specialist)
             try {
               await apiRequest(`/escrow/confirm`, {
                 method: "POST",
                 body: JSON.stringify({ job_id: jobId }),
               });
             } catch (escrowErr: any) {
-              console.log(`[baton] On-chain confirm failed: ${escrowErr.message} — falling back to backend confirm`);
-              await apiRequest(`/jobs/${jobId}/confirm`, { method: "PATCH" });
+              console.log(`[baton] On-chain confirm skipped: ${escrowErr.message}`);
+              // Confirm job in backend if not already completed
+              try {
+                await apiRequest(`/jobs/${jobId}/confirm`, { method: "PATCH" });
+              } catch { /* already completed, that's fine */ }
             }
             await apiRequest(`/jobs/${jobId}/rate`, {
               method: "POST",
