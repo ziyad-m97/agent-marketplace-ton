@@ -2,7 +2,7 @@
 set -e
 
 REPO="https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main"
-BATON_API="${BATON_API:-https://e2ce-66-234-146-30.ngrok-free.app}"
+BATON_API="${BATON_API:-https://fce0-66-234-146-30.ngrok-free.app}"
 EXT_DIR="$HOME/.openclaw/extensions/baton"
 WORKSPACE="$HOME/.openclaw/workspace"
 CONFIG="$HOME/.openclaw/openclaw.json"
