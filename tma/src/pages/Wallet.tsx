@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useTonWallet, useTonAddress, useTonConnectModal, CHAIN, TonConnectButton } from '@tonconnect/ui-react';
+import { useTonWallet, useTonAddress, useTonConnectModal, useTonConnectUI, CHAIN, TonConnectButton } from '@tonconnect/ui-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const API_HEADERS: HeadersInit = { 'ngrok-skip-browser-warning': 'true' };
@@ -14,6 +14,14 @@ export function Wallet() {
   const [initialBalance, setInitialBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // TonConnect UI for deposit
+  const [tonConnectUI] = useTonConnectUI();
+
+  // Deposit state
+  const [depositAmount, setDepositAmount] = useState('2');
+  const [depositing, setDepositing] = useState(false);
+  const [depositResult, setDepositResult] = useState<string | null>(null);
 
   // Withdraw state
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -77,6 +85,30 @@ export function Wallet() {
     const interval = setInterval(refreshBalance, 15000);
     return () => clearInterval(interval);
   }, [fetchBatonWallet, refreshBalance, tonConnectAddress]);
+
+  const handleDeposit = async () => {
+    if (!batonAddress || !depositAmount) return;
+    setDepositing(true);
+    setDepositResult(null);
+    try {
+      const amountNano = BigInt(Math.floor(parseFloat(depositAmount) * 1e9)).toString();
+      await tonConnectUI.sendTransaction({
+        validUntil: Math.floor(Date.now() / 1000) + 600,
+        messages: [{ address: batonAddress, amount: amountNano }],
+      });
+      setDepositResult(`Deposited ${depositAmount} TON`);
+      setDepositAmount('2');
+      setTimeout(refreshBalance, 8000);
+    } catch (err: any) {
+      if (err?.message?.includes('Cancelled') || err?.message?.includes('rejected')) {
+        setDepositResult(null);
+      } else {
+        setDepositResult(`Error: ${err.message}`);
+      }
+    } finally {
+      setDepositing(false);
+    }
+  };
 
   const handleWithdraw = async () => {
     if (!tonConnectAddress || !withdrawAmount) return;
@@ -197,15 +229,6 @@ export function Wallet() {
       </header>
 
       <div className="space-y" style={{ paddingTop: 24 }}>
-        {wallet.account.chain === CHAIN.MAINNET && (
-          <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-lg)', padding: '16px', marginBottom: '16px', textAlign: 'center' }}>
-            <p style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 600 }}>Mainnet Detected!</p>
-            <p style={{ color: 'var(--on-surface-variant)', fontSize: 12, marginTop: 4 }}>
-              Please switch your wallet to <b>Testnet</b> to use this preview app.
-            </p>
-          </div>
-        )}
-
         {/* Baton Wallet Balance Card */}
         <div className="glass-card">
           <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
@@ -294,31 +317,31 @@ export function Wallet() {
             <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--on-surface)' }}>Deposit TON</span>
           </div>
 
-          {wallet.account.chain === CHAIN.TESTNET && (
-            <a href="https://t.me/testgiver_ton_bot" target="_blank" rel="noopener noreferrer"
-              className="btn btn-primary"
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', marginBottom: 12 }}>
-              <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>water_drop</span>
-              Get Free Testnet TON
-            </a>
-          )}
+          <input
+            type="number" step="0.5" min="0" placeholder="Amount in TON"
+            value={depositAmount} onChange={e => setDepositAmount(e.target.value)}
+            className="glass-input" style={{ marginBottom: 12 }}
+          />
 
-          <button className="btn btn-secondary" onClick={() => {
-            if (batonAddress) {
-              navigator.clipboard.writeText(batonAddress).then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              });
-            }
-          }}>
+          <button className="btn btn-primary" onClick={handleDeposit}
+            disabled={depositing || !depositAmount || parseFloat(depositAmount) <= 0}>
             <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>
-              {copied ? 'check' : 'content_copy'}
+              {depositing ? 'hourglass_empty' : 'add_circle'}
             </span>
-            {copied ? 'Baton Address Copied!' : 'Copy Baton Address'}
+            {depositing ? 'Confirm in Tonkeeper...' : `Deposit ${depositAmount || ''} TON`}
           </button>
 
+          {depositResult && (
+            <p style={{
+              fontSize: 12, marginTop: 12, textAlign: 'center', lineHeight: 1.5,
+              color: depositResult.startsWith('Error') ? 'var(--danger)' : 'var(--primary)',
+            }}>
+              {depositResult}
+            </p>
+          )}
+
           <p style={{ fontSize: 11, color: 'var(--on-surface-variant)', marginTop: 12, lineHeight: 1.5, textAlign: 'center' }}>
-            Send TON to your Baton address above. Your agent will use this balance for escrow payments.
+            Transfers TON from your personal wallet to your Baton account.
           </p>
         </div>
 
