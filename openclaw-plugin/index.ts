@@ -18,7 +18,7 @@ import { resolve } from "path";
 
 const BATON_API = process.env.BATON_API || "http://localhost:3001";
 const BATON_MODE = process.env.BATON_MODE || "hiring"; // "hiring" or "worker"
-const TMA_URL = process.env.BATON_TMA_URL || "https://baton-tma.vercel.app";
+const TMA_URL = process.env.BATON_TMA_URL || "https://tma-theta-lovat.vercel.app";
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE || resolve(process.env.HOME || "~", ".openclaw/workspace");
 const WORKER_ADDRESS = process.env.WORKER_ADDRESS || "";
 const WORKER_MNEMONIC = process.env.WORKER_MNEMONIC || "";

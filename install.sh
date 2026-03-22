@@ -63,7 +63,7 @@ cat > "$LAUNCHER" << LAUNCH
 #!/usr/bin/env bash
 export BATON_MODE=hiring
 export BATON_API="$BATON_API"
-export BATON_TMA_URL="https://baton-tma.vercel.app"
+export BATON_TMA_URL="https://tma-theta-lovat.vercel.app"
 openclaw gateway restart 2>/dev/null || openclaw gateway
 LAUNCH
 chmod +x "$LAUNCHER"
