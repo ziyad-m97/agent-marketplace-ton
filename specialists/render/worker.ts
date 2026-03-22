@@ -103,8 +103,8 @@ async function generateWithTripo(prompt: string): Promise<string> {
     console.log(`  [tripo] Status: ${status}`);
 
     if (status === "success") {
-      const modelUrl = statusData.data?.output?.model;
-      if (!modelUrl) throw new Error("Tripo returned success but no model URL");
+      const modelUrl = statusData.data?.output?.pbr_model || statusData.data?.output?.model;
+      if (!modelUrl) throw new Error("Tripo returned success but no model URL: " + JSON.stringify(statusData.data?.output));
 
       // 3. Download .glb
       console.log("  [tripo] Downloading model...");

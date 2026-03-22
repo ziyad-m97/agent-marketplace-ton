@@ -4,6 +4,15 @@ import { useTonWallet, useTonAddress, useTonConnectModal, useTonConnectUI, CHAIN
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const API_HEADERS: HeadersInit = { 'ngrok-skip-browser-warning': 'true' };
 
+/** Get Telegram user ID from WebApp init data — used as wallet identity */
+function getTelegramUserId(): string | null {
+  try {
+    const tg = (window as any).Telegram?.WebApp;
+    const userId = tg?.initDataUnsafe?.user?.id;
+    return userId ? `telegram:${userId}` : null;
+  } catch { return null; }
+}
+
 export function Wallet() {
   const wallet = useTonWallet();
   const tonConnectAddress = useTonAddress();
@@ -27,9 +36,12 @@ export function Wallet() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawResult, setWithdrawResult] = useState<string | null>(null);
 
+  // Wallet identity: prefer Telegram user ID (shared with plugin), fallback to TonConnect
+  const walletIdentity = getTelegramUserId() || tonConnectAddress;
+
   // Get or create Baton wallet + fetch balance
   const fetchBatonWallet = useCallback(async () => {
-    if (!tonConnectAddress) {
+    if (!walletIdentity) {
       setBatonAddress(null);
       setBalance(null);
       return;
@@ -40,18 +52,18 @@ export function Wallet() {
       const res = await fetch(`${API_URL}/wallets/get-or-create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...API_HEADERS },
-        body: JSON.stringify({ ton_connect_address: tonConnectAddress }),
+        body: JSON.stringify({ ton_connect_address: walletIdentity }),
       });
       const data = await res.json();
       setBatonAddress(data.baton_address);
       setBalance(data.balance_ton);
 
       // Track initial balance for spending
-      const stored = localStorage.getItem(`baton_initial_${tonConnectAddress}`);
+      const stored = localStorage.getItem(`baton_initial_${walletIdentity}`);
       if (stored) {
         setInitialBalance(parseFloat(stored));
       } else if (data.balance_ton > 0) {
-        localStorage.setItem(`baton_initial_${tonConnectAddress}`, String(data.balance_ton));
+        localStorage.setItem(`baton_initial_${walletIdentity}`, String(data.balance_ton));
         setInitialBalance(data.balance_ton);
       }
     } catch (err) {
@@ -59,14 +71,14 @@ export function Wallet() {
     } finally {
       setLoading(false);
     }
-  }, [tonConnectAddress]);
+  }, [walletIdentity]);
 
   // Refresh just the balance
   const refreshBalance = useCallback(async () => {
-    if (!tonConnectAddress) return;
+    if (!walletIdentity) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/wallets/${encodeURIComponent(tonConnectAddress)}/balance`, {
+      const res = await fetch(`${API_URL}/wallets/${encodeURIComponent(walletIdentity)}/balance`, {
         headers: API_HEADERS,
       });
       const data = await res.json();
@@ -76,14 +88,14 @@ export function Wallet() {
     } finally {
       setLoading(false);
     }
-  }, [tonConnectAddress]);
+  }, [walletIdentity]);
 
   useEffect(() => {
     fetchBatonWallet();
-    if (!tonConnectAddress) return;
+    if (!walletIdentity) return;
     const interval = setInterval(refreshBalance, 15000);
     return () => clearInterval(interval);
-  }, [fetchBatonWallet, refreshBalance, tonConnectAddress]);
+  }, [fetchBatonWallet, refreshBalance, walletIdentity]);
 
   const handleDeposit = async () => {
     if (!batonAddress || !depositAmount) return;
@@ -110,7 +122,7 @@ export function Wallet() {
   };
 
   const handleWithdraw = async () => {
-    if (!tonConnectAddress || !withdrawAmount) return;
+    if (!walletIdentity || !withdrawAmount) return;
     setWithdrawing(true);
     setWithdrawResult(null);
     try {
@@ -118,8 +130,8 @@ export function Wallet() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...API_HEADERS },
         body: JSON.stringify({
-          ton_connect_address: tonConnectAddress,
-          to_address: tonConnectAddress, // withdraw to personal wallet
+          ton_connect_address: walletIdentity,
+          to_address: tonConnectAddress, // withdraw to personal TonConnect wallet
           amount: parseFloat(withdrawAmount),
         }),
       });
@@ -153,9 +165,9 @@ export function Wallet() {
 
   const resetInitialBalance = () => {
     if (!tonConnectAddress) return;
-    localStorage.removeItem(`baton_initial_${tonConnectAddress}`);
+    localStorage.removeItem(`baton_initial_${walletIdentity}`);
     if (balance !== null && balance > 0) {
-      localStorage.setItem(`baton_initial_${tonConnectAddress}`, String(balance));
+      localStorage.setItem(`baton_initial_${walletIdentity}`, String(balance));
       setInitialBalance(balance);
     } else {
       setInitialBalance(null);

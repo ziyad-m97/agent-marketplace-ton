@@ -23,21 +23,23 @@ const WORKSPACE = process.env.OPENCLAW_WORKSPACE || resolve(process.env.HOME || 
 const WORKER_ADDRESS = process.env.WORKER_ADDRESS || "";
 const WORKER_MNEMONIC = process.env.WORKER_MNEMONIC || "";
 
-// Hirer's Baton wallet address (resolved on first use)
-let hirerBatonAddress: string | null = null;
+// Per-user Baton wallet cache (keyed by Telegram chat ID)
+const hirerWalletCache = new Map<string, string>();
 
-async function getHirerBatonAddress(): Promise<string> {
-  if (hirerBatonAddress) return hirerBatonAddress;
+async function getHirerBatonAddress(chatId: string | null): Promise<string> {
+  const identity = chatId ? `telegram:${chatId}` : "openclaw-hirer";
+  const cached = hirerWalletCache.get(identity);
+  if (cached) return cached;
   try {
     const result = await apiRequest("/wallets/get-or-create", {
       method: "POST",
-      body: JSON.stringify({ ton_connect_address: "openclaw-hirer" }),
+      body: JSON.stringify({ ton_connect_address: identity }),
     });
-    hirerBatonAddress = result.baton_address;
-    return hirerBatonAddress!;
+    hirerWalletCache.set(identity, result.baton_address);
+    return result.baton_address;
   } catch (err: any) {
     console.log(`[baton] Failed to get hirer wallet: ${err.message}`);
-    return "openclaw-hirer"; // fallback
+    return "openclaw-hirer";
   }
 }
 
@@ -247,7 +249,7 @@ export default function (api: any) {
         }
 
         const specialist = searchResult.agents[0];
-        const hirerAddr = await getHirerBatonAddress();
+        const hirerAddr = await getHirerBatonAddress(chatId);
         const jobId = crypto.randomUUID();
         await apiRequest("/jobs/create", {
           method: "POST",

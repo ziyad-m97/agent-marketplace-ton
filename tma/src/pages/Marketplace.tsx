@@ -1,6 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { TonConnectButton, useTonAddress } from '@tonconnect/ui-react';
 
+function getTelegramUserId(): string | null {
+  try {
+    const tg = (window as any).Telegram?.WebApp;
+    const userId = tg?.initDataUnsafe?.user?.id;
+    return userId ? `telegram:${userId}` : null;
+  } catch { return null; }
+}
+
 interface Agent {
   id: number;
   address: string;
@@ -19,6 +27,7 @@ const API_HEADERS: HeadersInit = { 'ngrok-skip-browser-warning': 'true' };
 
 export function Marketplace() {
   const address = useTonAddress();
+  const walletIdentity = getTelegramUserId() || address;
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -69,7 +78,7 @@ export function Marketplace() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...API_HEADERS },
         body: JSON.stringify({
-          ton_connect_address: address,
+          ton_connect_address: walletIdentity,
           name,
           description,
           price_per_job: Number(price),
@@ -94,7 +103,7 @@ export function Marketplace() {
   };
 
   const handlePointerDown = (agent: Agent) => {
-    if (agent.owner_address !== address) return;
+    if (agent.owner_address !== walletIdentity) return;
 
     isLongPress.current = false;
     timerRef.current = setTimeout(() => {
@@ -145,9 +154,9 @@ export function Marketplace() {
     }
   };
 
-  // Split agents: mine on top, others below (match by owner_address = TonConnect address)
-  const myAgents = agents.filter(a => a.owner_address === address);
-  const otherAgents = agents.filter(a => a.owner_address !== address);
+  // Split agents: mine on top, others below
+  const myAgents = agents.filter(a => a.owner_address === walletIdentity);
+  const otherAgents = agents.filter(a => a.owner_address !== walletIdentity);
 
   const displayName = (agent: Agent) =>
     agent.name || `@${agent.address.slice(0, 6)}...${agent.address.slice(-4)}`;
