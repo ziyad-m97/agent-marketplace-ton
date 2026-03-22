@@ -2,52 +2,87 @@
 set -e
 
 REPO="https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main"
+BATON_API="${BATON_API:-https://e2ce-66-234-146-30.ngrok-free.app}"
 EXT_DIR="$HOME/.openclaw/extensions/baton"
 WORKSPACE="$HOME/.openclaw/workspace"
 CONFIG="$HOME/.openclaw/openclaw.json"
 
-echo "Installing Baton Protocol plugin..."
+echo ""
+echo "  ╔══════════════════════════════════════╗"
+echo "  ║   Baton Protocol — Agent Installer   ║"
+echo "  ╚══════════════════════════════════════╝"
+echo ""
+
+# 0. Check OpenClaw is installed
+if ! command -v openclaw &>/dev/null; then
+  echo "OpenClaw not found. Installing..."
+  curl -fsSL https://get.openclaw.ai | bash
+  echo ""
+  echo "Run 'openclaw configure' to set up auth, then re-run this script."
+  exit 1
+fi
 
 # 1. Download plugin files
+echo "[1/4] Downloading Baton plugin..."
 mkdir -p "$EXT_DIR"
 curl -sL "$REPO/openclaw-plugin/index.ts" -o "$EXT_DIR/index.ts"
 curl -sL "$REPO/openclaw-plugin/openclaw.plugin.json" -o "$EXT_DIR/openclaw.plugin.json"
 
 # 2. Download agent instructions
+echo "[2/4] Setting up workspace..."
 mkdir -p "$WORKSPACE"
 curl -sL "$REPO/BATON.md" -o "$WORKSPACE/BATON.md"
 
 # 3. Enable plugin in openclaw.json
+echo "[3/4] Enabling plugin..."
 if [ -f "$CONFIG" ]; then
   if grep -q '"baton"' "$CONFIG"; then
-    echo "Plugin already enabled in config."
+    echo "  Plugin already enabled."
   else
-    # Insert "baton": { "enabled": true } into plugins.entries
     sed -i.bak '/"entries":/,/}/{
       /}$/i\
 \      "baton": { "enabled": true },
     }' "$CONFIG" 2>/dev/null || {
-      # macOS sed fallback
       sed -i '' '/"entries":/,/}/{
         /}$/i\
 \      "baton": { "enabled": true },
       }' "$CONFIG"
     }
     rm -f "$CONFIG.bak"
-    echo "Plugin enabled in openclaw.json."
+    echo "  Plugin enabled in openclaw.json."
   fi
 else
-  echo "Warning: $CONFIG not found. Add manually:"
-  echo '  "plugins": { "entries": { "baton": { "enabled": true } } }'
+  echo "  Warning: $CONFIG not found. Run 'openclaw configure' first."
+  exit 1
 fi
 
-# 4. Restart gateway if running
-if command -v openclaw &>/dev/null; then
-  openclaw gateway restart 2>/dev/null && echo "Gateway restarted." || echo "Restart gateway manually: openclaw gateway restart"
-else
-  echo "Restart your OpenClaw gateway to activate the plugin."
-fi
+# 4. Create env launcher script
+echo "[4/4] Creating launcher..."
+LAUNCHER="$EXT_DIR/start.sh"
+cat > "$LAUNCHER" << LAUNCH
+#!/usr/bin/env bash
+export BATON_MODE=hiring
+export BATON_API="$BATON_API"
+export BATON_TMA_URL="https://baton-tma.vercel.app"
+openclaw gateway restart 2>/dev/null || openclaw gateway
+LAUNCH
+chmod +x "$LAUNCHER"
+
+# Try to restart gateway
+openclaw gateway restart 2>/dev/null && echo "  Gateway restarted." || true
 
 echo ""
-echo "Done! Your agent now has baton_pass, baton_status, baton_rate, baton_download."
-echo "Open Telegram — the Baton Account button is in your bot's menu."
+echo "  ✓ Baton Protocol installed!"
+echo ""
+echo "  Your agent now has these tools:"
+echo "    • baton_pass    — delegate work to a specialist"
+echo "    • baton_status  — check job progress"
+echo "    • baton_rate    — rate and release payment"
+echo "    • baton_download — get deliverables"
+echo ""
+echo "  To start with Baton env vars:"
+echo "    source $LAUNCHER"
+echo ""
+echo "  Or manually:"
+echo "    BATON_MODE=hiring BATON_API=$BATON_API openclaw gateway"
+echo ""

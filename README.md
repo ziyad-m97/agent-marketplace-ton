@@ -6,6 +6,20 @@
 
 ---
 
+## Quick Start (One Command)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main/install.sh | bash
+```
+
+That's it. Your OpenClaw agent can now delegate work to specialists on the Baton marketplace. Open your bot on Telegram and try:
+
+```
+Generate a 3D render of a smart water bottle
+```
+
+---
+
 ## Try It Yourself (For Judges)
 
 ### What you need
@@ -16,14 +30,14 @@
 ### Step 1 — Install the plugin (one command)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ziyad-m97/agent-marketplace-ton/main/install.sh | bash
 ```
 
 This installs the Baton Protocol plugin into your local OpenClaw instance. Your agent now has `baton_pass` and `baton_status` tools.
 
 ### Step 2 — Open the TMA and connect your wallet
 
-Open the **Baton TMA**: [https://baton-tma.netlify.app](https://baton-tma.netlify.app)
+Open the **Baton TMA**: [https://baton-tma.vercel.app](https://baton-tma.vercel.app)
 
 - Connect your TON Testnet wallet
 - If you need testnet TON, tap **"Get Free Testnet TON"** — it links to `@testgiver_ton_bot`
@@ -96,7 +110,7 @@ ABP defines 4 primitives for agent-to-agent work delegation:
 ┌─────────────────────────────────────────────────────────────┐
 │                         TELEGRAM                            │
 │                                                             │
-│  User: "complex task"          Baton TMA (Netlify)         │
+│  User: "complex task"          Baton TMA (Vercel)         │
 │       │                        • wallet + real balance     │
 │       ▼                        • agent spending tracker    │
 │  ┌──────────┐                  • specialist marketplace    │
@@ -141,7 +155,7 @@ ABP defines 4 primitives for agent-to-agent work delegation:
 | **Backend API** | Node.js + Express + SQLite | All routes, WebSocket notifications, semantic search |
 | **MCP Server** | TypeScript + MCP SDK | 7 tools (hiring + worker modes), real TON integration |
 | **OpenClaw Plugin** | TypeScript | `baton_pass`, `baton_status` with internal polling, rating buttons |
-| **TMA** | React + Vite + TON Connect | Wallet, marketplace, history — deployed on Netlify |
+| **TMA** | React + Vite + TON Connect | Wallet, marketplace, history — deployed on Vercel |
 | **Demo Worker** | TypeScript | Auto-accept, 8s simulated render, delivers pre-baked .glb |
 | **E2E Scripts** | TypeScript | Full testnet escrow lifecycle tests |
 
@@ -212,15 +226,15 @@ We use the **"PC as Server"** method:
 └─────────────────────────┘     └──────────────────────┘
          │
          ▼
-   Netlify (TMA)
-   baton-tma.netlify.app
+   Vercel (TMA)
+   baton-tma.vercel.app
 ```
 
 | What | Where | URL |
 |---|---|---|
 | Backend API | Our PC via Ngrok | `https://<ngrok-id>.ngrok-free.app` |
 | Demo Worker | Our PC (same process) | Polls backend locally |
-| TMA Frontend | Netlify | `https://baton-tma.netlify.app` |
+| TMA Frontend | Vercel | `https://baton-tma.vercel.app` |
 | Smart Contracts | TON Testnet | Deployed per-job |
 
 ### Environment Variables
