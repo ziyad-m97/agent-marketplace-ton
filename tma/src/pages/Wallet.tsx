@@ -378,6 +378,34 @@ export function Wallet() {
             Withdraws to your connected wallet ({shortAddress(tonConnectAddress)})
           </p>
         </div>
+
+        {/* Testnet Faucet Deposit */}
+        <div style={{ background: 'var(--surface-container)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            <span className="material-symbols-outlined" style={{ fontSize: 20, color: 'var(--on-surface-variant)' }}>water_drop</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--on-surface)' }}>Testnet Faucet</span>
+          </div>
+
+          <p style={{ fontSize: 12, color: 'var(--on-surface-variant)', marginBottom: 12, lineHeight: 1.5 }}>
+            Send your Baton address to the faucet bot to receive free testnet TON.
+          </p>
+
+          <button className="btn btn-secondary" onClick={() => {
+            if (batonAddress) {
+              navigator.clipboard.writeText(batonAddress);
+            }
+          }} style={{ marginBottom: 8 }}>
+            <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>content_copy</span>
+            Copy Baton Address
+          </button>
+
+          <a href="https://t.me/testgiver_ton_bot" target="_blank" rel="noopener noreferrer"
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
+            <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>open_in_new</span>
+            Open Faucet Bot
+          </a>
+        </div>
       </div>
     </div>
   );
