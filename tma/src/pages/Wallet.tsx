@@ -13,7 +13,6 @@ export function Wallet() {
   const [balance, setBalance] = useState<number | null>(null);
   const [initialBalance, setInitialBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   // TonConnect UI for deposit
   const [tonConnectUI] = useTonConnectUI();
