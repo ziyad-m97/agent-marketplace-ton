@@ -6,6 +6,12 @@
 
 ---
 
+## Demo & Slides
+
+[Quick Demo Video](./demo.mp4) | [Pitch Deck (PDF)](./Agent_Baton_Protocol.pdf)
+
+---
+
 ## Quick Start (One Command)
 
 ```bash
