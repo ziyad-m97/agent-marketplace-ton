@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
-import { mnemonicNew, mnemonicToWalletKey } from '@ton/crypto';
-import { WalletContractV4 } from '@ton/ton';
+import { generateWallet } from '../ton/wallet';
 
 export const agentsRouter = Router();
 
@@ -90,54 +89,55 @@ function sanitizeAgent(agent: any): any {
 // ===== ROUTES =====
 
 // Register a specialist
-// If no address provided, auto-generates a TON wallet
-// If address already exists, updates skills/description/price (upsert)
+// Uses ton_connect_address to look up/create a Baton wallet.
+// The agent's on-chain address = the Baton wallet address (for escrow compatibility).
 agentsRouter.post('/register', async (req: Request, res: Response) => {
-  const { address: providedAddress, skills, price_per_job, description, name } = req.body;
+  const { ton_connect_address, address: legacyAddress, skills, price_per_job, description, name } = req.body;
 
   if (!skills || !price_per_job) {
     res.status(400).json({ error: 'skills and price_per_job are required' });
     return;
   }
 
+  // Determine identity: prefer ton_connect_address, fall back to legacy address
+  const identity = ton_connect_address || legacyAddress;
+  if (!identity) {
+    res.status(400).json({ error: 'ton_connect_address (or address) required' });
+    return;
+  }
+
   const db = getDb();
 
   try {
-    let address = providedAddress;
-    let mnemonic: string | null = null;
+    // Get or create Baton wallet for this identity
+    let wallet = db.prepare('SELECT baton_address FROM wallets WHERE ton_connect_address = ?').get(identity) as any;
 
-    // Auto-generate wallet if no address provided
-    if (!address) {
-      const words = await mnemonicNew(24);
-      mnemonic = words.join(' ');
-      const keypair = await mnemonicToWalletKey(words);
-      const wallet = WalletContractV4.create({ workchain: 0, publicKey: keypair.publicKey });
-      address = wallet.address.toString();
+    if (!wallet) {
+      const { mnemonic, address: batonAddress } = await generateWallet();
+      db.prepare('INSERT INTO wallets (ton_connect_address, baton_address, mnemonic) VALUES (?, ?, ?)')
+        .run(identity, batonAddress, mnemonic);
+      wallet = { baton_address: batonAddress };
     }
 
-    // Upsert: update if address already exists
-    const existing = db.prepare('SELECT * FROM agents WHERE address = ?').get(address) as any;
+    const agentAddress = wallet.baton_address;
+
+    // Upsert: update if this owner already has an agent
+    const existing = db.prepare('SELECT * FROM agents WHERE owner_address = ?').get(identity) as any;
 
     if (existing) {
       db.prepare(`
-        UPDATE agents SET skills = ?, price_per_job = ?, description = ?, name = ?, active = 1, updated_at = datetime('now')
-        WHERE address = ?
-      `).run(JSON.stringify(skills), price_per_job, description || null, name || null, address);
+        UPDATE agents SET skills = ?, price_per_job = ?, description = ?, name = ?, address = ?, active = 1, updated_at = datetime('now')
+        WHERE owner_address = ?
+      `).run(JSON.stringify(skills), price_per_job, description || null, name || null, agentAddress, identity);
 
-      res.json({ status: 'updated', address });
+      res.json({ status: 'updated', address: agentAddress, baton_address: agentAddress });
     } else {
       db.prepare(`
-        INSERT INTO agents (address, skills, price_per_job, description, name, mnemonic)
+        INSERT INTO agents (address, skills, price_per_job, description, name, owner_address)
         VALUES (?, ?, ?, ?, ?, ?)
-      `).run(address, JSON.stringify(skills), price_per_job, description || null, name || null, mnemonic);
+      `).run(agentAddress, JSON.stringify(skills), price_per_job, description || null, name || null, identity);
 
-      const result: any = { status: 'registered', address };
-      // Only return mnemonic on first registration (when auto-generated)
-      if (mnemonic) {
-        result.mnemonic = mnemonic;
-        result.note = 'Wallet auto-generated. Save this mnemonic — it will not be shown again.';
-      }
-      res.json(result);
+      res.json({ status: 'registered', address: agentAddress, baton_address: agentAddress });
     }
   } catch (err: any) {
     res.status(500).json({ error: err.message });

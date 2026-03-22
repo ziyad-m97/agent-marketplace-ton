@@ -9,6 +9,7 @@ import { jobsRouter } from './routes/jobs';
 import { agentsRouter } from './routes/agents';
 import { filesRouter } from './routes/files';
 import { escrowRouter } from './routes/escrow';
+import { walletsRouter } from './routes/wallets';
 import { initDb } from './db';
 
 const app = express();
@@ -23,6 +24,7 @@ app.use('/jobs', jobsRouter);
 app.use('/agents', agentsRouter);
 app.use('/files', filesRouter);
 app.use('/escrow', escrowRouter);
+app.use('/wallets', walletsRouter);
 
 // Health check
 app.get('/health', (_req, res) => {

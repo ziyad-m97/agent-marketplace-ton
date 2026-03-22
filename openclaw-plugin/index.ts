@@ -23,6 +23,24 @@ const WORKSPACE = process.env.OPENCLAW_WORKSPACE || resolve(process.env.HOME || 
 const WORKER_ADDRESS = process.env.WORKER_ADDRESS || "";
 const WORKER_MNEMONIC = process.env.WORKER_MNEMONIC || "";
 
+// Hirer's Baton wallet address (resolved on first use)
+let hirerBatonAddress: string | null = null;
+
+async function getHirerBatonAddress(): Promise<string> {
+  if (hirerBatonAddress) return hirerBatonAddress;
+  try {
+    const result = await apiRequest("/wallets/get-or-create", {
+      method: "POST",
+      body: JSON.stringify({ ton_connect_address: "openclaw-hirer" }),
+    });
+    hirerBatonAddress = result.baton_address;
+    return hirerBatonAddress!;
+  } catch (err: any) {
+    console.log(`[baton] Failed to get hirer wallet: ${err.message}`);
+    return "openclaw-hirer"; // fallback
+  }
+}
+
 async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
   const url = `${BATON_API}${endpoint}`;
   const res = await fetch(url, {
@@ -229,12 +247,13 @@ export default function (api: any) {
         }
 
         const specialist = searchResult.agents[0];
+        const hirerAddr = await getHirerBatonAddress();
         const jobId = crypto.randomUUID();
         await apiRequest("/jobs/create", {
           method: "POST",
           body: JSON.stringify({
             id: jobId,
-            hirer_address: "openclaw-hirer",
+            hirer_address: hirerAddr,
             worker_address: specialist.address,
             task: params.task,
             context: params.context || "",

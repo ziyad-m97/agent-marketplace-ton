@@ -1,7 +1,7 @@
 import { Address, toNano } from '@ton/core';
 import { Sender } from '@ton/core';
 import { Escrow } from './tact_Escrow';
-import { getClient, getSender, getWalletAddress } from './wallet';
+import { getClient, getSenderFromMnemonic } from './wallet';
 
 export const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -19,13 +19,13 @@ async function waitForDeploy(escrowAddress: Address, timeoutMs = 30000): Promise
 }
 
 export async function deployAndLockEscrow(
+  hirerMnemonic: string,
   workerAddress: string,
   jobId: string,
   amountTon: number,
 ): Promise<{ escrowAddress: string }> {
   const client = await getClient();
-  const sender = await getSender();
-  const hirerAddress = await getWalletAddress();
+  const { sender, address: hirerAddress } = await getSenderFromMnemonic(hirerMnemonic);
   const treasuryAddress = Address.parse(process.env.TREASURY_ADDRESS || hirerAddress.toString());
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 86400); // 24h
 
@@ -65,9 +65,9 @@ export async function deployAndLockEscrow(
   return { escrowAddress: escrow.address.toString() };
 }
 
-export async function confirmEscrow(escrowAddress: string, jobId: string): Promise<void> {
+export async function confirmEscrow(hirerMnemonic: string, escrowAddress: string, jobId: string): Promise<void> {
   const client = await getClient();
-  const sender = await getSender();
+  const { sender } = await getSenderFromMnemonic(hirerMnemonic);
 
   const escrow = Escrow.fromAddress(Address.parse(escrowAddress));
   const openedEscrow = client.open(escrow);
@@ -102,9 +102,9 @@ export async function deliverOnChainWithSender(
   console.log(`[escrow] On-chain delivery confirmed`);
 }
 
-export async function disputeEscrow(escrowAddress: string, jobId: string): Promise<void> {
+export async function disputeEscrow(hirerMnemonic: string, escrowAddress: string, jobId: string): Promise<void> {
   const client = await getClient();
-  const sender = await getSender();
+  const { sender } = await getSenderFromMnemonic(hirerMnemonic);
 
   const escrow = Escrow.fromAddress(Address.parse(escrowAddress));
   const openedEscrow = client.open(escrow);

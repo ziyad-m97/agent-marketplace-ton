@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getDb } from '../db';
-import { getBalance, getSenderFromMnemonic } from '../ton/wallet';
+import { getBalanceForAddress, getSenderFromMnemonic } from '../ton/wallet';
 import {
   deployAndLockEscrow,
   confirmEscrow,
@@ -11,6 +11,28 @@ import {
 } from '../ton/escrow';
 
 export const escrowRouter = Router();
+
+/** Look up a wallet mnemonic by baton_address */
+function getWalletMnemonic(batonAddress: string): string | null {
+  const db = getDb();
+  const wallet = db.prepare('SELECT mnemonic FROM wallets WHERE baton_address = ?').get(batonAddress) as any;
+  return wallet?.mnemonic || null;
+}
+
+/** Look up worker mnemonic: try wallets table (via agent owner), then agent.mnemonic, then env */
+function getWorkerMnemonic(workerAddress: string): string | null {
+  const db = getDb();
+  // 1. Find agent by address, get owner, look up wallet
+  const agent = db.prepare('SELECT owner_address, mnemonic FROM agents WHERE address = ?').get(workerAddress) as any;
+  if (agent?.owner_address) {
+    const wallet = db.prepare('SELECT mnemonic FROM wallets WHERE ton_connect_address = ?').get(agent.owner_address) as any;
+    if (wallet?.mnemonic) return wallet.mnemonic;
+  }
+  // 2. Legacy: agent.mnemonic
+  if (agent?.mnemonic) return agent.mnemonic;
+  // 3. Fallback: env
+  return process.env.WORKER_MNEMONIC || null;
+}
 
 // Deploy escrow contract and lock TON
 escrowRouter.post('/deploy', async (req, res) => {
@@ -24,9 +46,15 @@ escrowRouter.post('/deploy', async (req, res) => {
   const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job_id) as any;
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
+  // Look up hirer wallet mnemonic
+  const hirerMnemonic = getWalletMnemonic(job.hirer_address);
+  if (!hirerMnemonic) {
+    return res.status(400).json({ error: `No wallet found for hirer ${job.hirer_address}` });
+  }
+
   // Check hirer balance
   try {
-    const balance = await getBalance();
+    const balance = await getBalanceForAddress(job.hirer_address);
     const requiredNano = BigInt(Math.ceil((amount + 0.15) * 1e9));
     if (balance < requiredNano) {
       return res.status(400).json({
@@ -38,7 +66,7 @@ escrowRouter.post('/deploy', async (req, res) => {
   }
 
   try {
-    const { escrowAddress } = await deployAndLockEscrow(worker_address, job_id, amount);
+    const { escrowAddress } = await deployAndLockEscrow(hirerMnemonic, worker_address, job_id, amount);
 
     db.prepare('UPDATE jobs SET escrow_address = ?, updated_at = datetime(\'now\') WHERE id = ?')
       .run(escrowAddress, job_id);
@@ -54,9 +82,8 @@ escrowRouter.post('/deploy', async (req, res) => {
 escrowRouter.post('/deliver', async (req, res) => {
   const { job_id, worker_mnemonic } = req.body;
 
-  const mnemonic = worker_mnemonic || process.env.WORKER_MNEMONIC;
-  if (!job_id || !mnemonic) {
-    return res.status(400).json({ error: 'job_id and worker_mnemonic (or WORKER_MNEMONIC env) required' });
+  if (!job_id) {
+    return res.status(400).json({ error: 'job_id required' });
   }
 
   const db = getDb();
@@ -64,6 +91,11 @@ escrowRouter.post('/deliver', async (req, res) => {
   if (!job) return res.status(404).json({ error: 'Job not found' });
   if (!job.escrow_address || job.escrow_address.startsWith('pending')) {
     return res.status(400).json({ error: 'No escrow deployed for this job' });
+  }
+
+  const mnemonic = worker_mnemonic || getWorkerMnemonic(job.worker_address);
+  if (!mnemonic) {
+    return res.status(400).json({ error: 'No worker mnemonic available' });
   }
 
   const { sender } = await getSenderFromMnemonic(mnemonic);
@@ -83,7 +115,6 @@ escrowRouter.post('/deliver', async (req, res) => {
 });
 
 // Hirer confirms — BULLETPROOF: handles deploy, deliver, confirm, retries
-// This endpoint guarantees the specialist gets paid or returns a clear error.
 escrowRouter.post('/confirm', async (req, res) => {
   const { job_id } = req.body;
 
@@ -95,21 +126,26 @@ escrowRouter.post('/confirm', async (req, res) => {
   const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job_id) as any;
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
+  // Look up hirer wallet
+  const hirerMnemonic = getWalletMnemonic(job.hirer_address);
+  if (!hirerMnemonic) {
+    return res.status(400).json({ error: `No wallet found for hirer ${job.hirer_address}` });
+  }
+
   let escrowAddress = job.escrow_address;
 
   // ── Step 1: Ensure escrow is deployed ──
   if (!escrowAddress || escrowAddress.startsWith('pending')) {
     if (!job.worker_address || !job.amount) {
-      return res.status(400).json({ error: 'No escrow deployed and missing worker_address/amount to deploy one' });
+      return res.status(400).json({ error: 'No escrow deployed and missing worker_address/amount' });
     }
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         console.log(`[escrow] Catch-up deploy attempt ${attempt}/3 for job ${job_id}...`);
-        const result = await deployAndLockEscrow(job.worker_address, job_id, job.amount);
+        const result = await deployAndLockEscrow(hirerMnemonic, job.worker_address, job_id, job.amount);
         escrowAddress = result.escrowAddress;
         db.prepare('UPDATE jobs SET escrow_address = ?, updated_at = datetime(\'now\') WHERE id = ?')
           .run(escrowAddress, job_id);
-        console.log(`[escrow] Catch-up deploy succeeded: ${escrowAddress}`);
         break;
       } catch (deployErr: any) {
         console.error(`[escrow] Catch-up deploy attempt ${attempt} failed:`, deployErr.message);
@@ -121,32 +157,28 @@ escrowRouter.post('/confirm', async (req, res) => {
     }
   }
 
-  // ── Step 2: Check on-chain status and fix any missing steps ──
+  // ── Step 2: Check on-chain status and fix missing steps ──
   try {
     const { status: onChainStatus } = await getEscrowStatus(escrowAddress);
     console.log(`[escrow] On-chain status for job ${job_id}: ${onChainStatus}`);
 
-    // Already completed — nothing to do
     if (onChainStatus === 2n) {
       db.prepare('UPDATE jobs SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
         .run('completed', job_id);
       return res.json({ status: 'confirmed', escrow_address: escrowAddress, note: 'already completed on-chain' });
     }
 
-    // Status 0 = created → worker never delivered on-chain. Do it now.
+    // Status 0 = worker never delivered on-chain → do it now
     if (onChainStatus === 0n) {
-      // Try: 1) agent mnemonic from DB, 2) WORKER_MNEMONIC env var
-      const agent = db.prepare('SELECT mnemonic FROM agents WHERE address = ?').get(job.worker_address) as any;
-      const workerMnemonic = agent?.mnemonic || process.env.WORKER_MNEMONIC;
+      const workerMnemonic = getWorkerMnemonic(job.worker_address);
       if (!workerMnemonic) {
-        return res.status(500).json({ error: 'Escrow on-chain status is 0 (not delivered). No worker mnemonic available to catch-up deliver.' });
+        return res.status(500).json({ error: 'On-chain status is 0 (not delivered). No worker mnemonic available.' });
       }
       console.log(`[escrow] Catch-up on-chain delivery for job ${job_id}...`);
       const { sender: workerSender } = await getSenderFromMnemonic(workerMnemonic);
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           await deliverOnChainWithSender(escrowAddress, job_id, workerSender);
-          console.log(`[escrow] Catch-up delivery succeeded for job ${job_id}`);
           break;
         } catch (deliverErr: any) {
           console.error(`[escrow] Catch-up deliver attempt ${attempt} failed:`, deliverErr.message);
@@ -158,27 +190,23 @@ escrowRouter.post('/confirm', async (req, res) => {
       }
     }
 
-    // Status 3 = disputed → cannot confirm
     if (onChainStatus === 3n) {
       return res.status(400).json({ error: 'Escrow is disputed on-chain, cannot confirm' });
     }
 
-    // Status 4 = expired → already auto-released
     if (onChainStatus === 4n) {
       db.prepare('UPDATE jobs SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
         .run('completed', job_id);
       return res.json({ status: 'confirmed', escrow_address: escrowAddress, note: 'expired — auto-released to worker' });
     }
-
   } catch (statusErr: any) {
-    // If we can't read status, proceed with confirm anyway — the contract will reject if wrong state
     console.log(`[escrow] Could not read on-chain status: ${statusErr.message} — proceeding with confirm`);
   }
 
-  // ── Step 3: Confirm (release payment to worker) with retries ──
+  // ── Step 3: Confirm (release payment) with retries ──
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await confirmEscrow(escrowAddress, job_id);
+      await confirmEscrow(hirerMnemonic, escrowAddress, job_id);
 
       db.prepare('UPDATE jobs SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
         .run('completed', job_id);
@@ -210,8 +238,13 @@ escrowRouter.post('/dispute', async (req, res) => {
     return res.status(400).json({ error: 'No escrow deployed for this job' });
   }
 
+  const hirerMnemonic = getWalletMnemonic(job.hirer_address);
+  if (!hirerMnemonic) {
+    return res.status(400).json({ error: `No wallet found for hirer ${job.hirer_address}` });
+  }
+
   try {
-    await disputeEscrow(job.escrow_address, job_id);
+    await disputeEscrow(hirerMnemonic, job.escrow_address, job_id);
 
     db.prepare('UPDATE jobs SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
       .run('disputed', job_id);

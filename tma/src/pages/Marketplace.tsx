@@ -4,6 +4,7 @@ import { TonConnectButton, useTonAddress } from '@tonconnect/ui-react';
 interface Agent {
   id: number;
   address: string;
+  owner_address: string | null;
   name: string | null;
   skills: string[];
   price_per_job: number;
@@ -68,7 +69,7 @@ export function Marketplace() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...API_HEADERS },
         body: JSON.stringify({
-          address,
+          ton_connect_address: address,
           name,
           description,
           price_per_job: Number(price),
@@ -93,7 +94,7 @@ export function Marketplace() {
   };
 
   const handlePointerDown = (agent: Agent) => {
-    if (agent.address !== address) return;
+    if (agent.owner_address !== address) return;
 
     isLongPress.current = false;
     timerRef.current = setTimeout(() => {
@@ -114,7 +115,7 @@ export function Marketplace() {
   const handleCardClick = async (agent: Agent) => {
     if (isLongPress.current) return;
 
-    if (agent.address === address) {
+    if (agent.owner_address === address) {
       try {
         const res = await fetch(`${API_URL}/agents/${agent.id}`, { headers: API_HEADERS });
         const data = await res.json();
@@ -144,9 +145,9 @@ export function Marketplace() {
     }
   };
 
-  // Split agents: mine on top, others below
-  const myAgents = agents.filter(a => a.address === address);
-  const otherAgents = agents.filter(a => a.address !== address);
+  // Split agents: mine on top, others below (match by owner_address = TonConnect address)
+  const myAgents = agents.filter(a => a.owner_address === address);
+  const otherAgents = agents.filter(a => a.owner_address !== address);
 
   const displayName = (agent: Agent) =>
     agent.name || `@${agent.address.slice(0, 6)}...${agent.address.slice(-4)}`;

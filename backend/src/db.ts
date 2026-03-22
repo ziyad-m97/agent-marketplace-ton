@@ -30,7 +30,8 @@ export function initDb(): void {
       updated_at TEXT DEFAULT (datetime('now')),
       description TEXT,
       name TEXT,
-      mnemonic TEXT                  -- auto-generated wallet mnemonic (null if user-provided address)
+      mnemonic TEXT,                 -- legacy, use wallets table instead
+      owner_address TEXT             -- ton_connect_address of the owner
     );
 
     CREATE TABLE IF NOT EXISTS jobs (
@@ -46,6 +47,14 @@ export function initDb(): void {
       rating INTEGER,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS wallets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ton_connect_address TEXT NOT NULL UNIQUE,
+      baton_address TEXT NOT NULL UNIQUE,
+      mnemonic TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS files (
@@ -72,6 +81,10 @@ export function initDb(): void {
   if (!columns.some(c => c.name === 'updated_at')) {
     db.exec("ALTER TABLE agents ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))");
     console.log('Migrated: added updated_at column to agents');
+  }
+  if (!columns.some(c => c.name === 'owner_address')) {
+    db.exec("ALTER TABLE agents ADD COLUMN owner_address TEXT");
+    console.log('Migrated: added owner_address column to agents');
   }
 
   console.log('Database initialized');
