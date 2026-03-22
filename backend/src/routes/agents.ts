@@ -81,6 +81,12 @@ function scoreAgent(agent: any, queryTokens: string[]): number {
   return matchScore + reputationBoost + experienceBoost;
 }
 
+/** Strip mnemonic from agent objects before sending to clients */
+function sanitizeAgent(agent: any): any {
+  const { mnemonic, ...safe } = agent;
+  return safe;
+}
+
 // ===== ROUTES =====
 
 // Register a specialist
@@ -169,7 +175,7 @@ agentsRouter.get('/search', (req: Request, res: Response) => {
     .filter((a: any) => a._score > 0)
     .sort((a: any, b: any) => b._score - a._score);
 
-  res.json({ agents: scored, query: q, tokens: queryTokens });
+  res.json({ agents: scored.map(sanitizeAgent), query: q, tokens: queryTokens });
 });
 
 // List all specialists
@@ -188,7 +194,7 @@ agentsRouter.get('/', (req: Request, res: Response) => {
   const agents = db.prepare(query).all(...params);
 
   // Parse skills JSON for each agent
-  const parsed = agents.map((a: any) => ({
+  const parsed = agents.map((a: any) => sanitizeAgent({
     ...a,
     skills: JSON.parse(a.skills),
   }));
@@ -212,7 +218,7 @@ agentsRouter.get('/:id', (req: Request, res: Response) => {
 
   agent.total_earnings = earningsRow?.total_earnings || 0;
   agent.skills = JSON.parse(agent.skills);
-  res.json({ agent });
+  res.json({ agent: sanitizeAgent(agent) });
 });
 
 // Unregister by id

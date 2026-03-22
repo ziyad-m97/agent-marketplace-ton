@@ -57,7 +57,7 @@ jobsRouter.post('/search', async (req: Request, res: Response) => {
   }).filter((a: any) => a._score > 0 || queryTokens.length === 0)
     .sort((a: any, b: any) => b._score - a._score);
 
-  res.json({ agents: scored });
+  res.json({ agents: scored.map(({ mnemonic, ...safe }: any) => safe) });
 });
 
 // Create a new job
