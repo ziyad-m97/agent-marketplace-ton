@@ -1,5 +1,4 @@
 import { ApiClient } from '../api/client';
-import { confirmEscrow } from '../ton/escrow';
 
 const api = new ApiClient(process.env.BATON_API || 'http://localhost:3001');
 
@@ -10,36 +9,15 @@ interface BatonRateParams {
 
 export async function batonRate(params: BatonRateParams) {
   try {
-    // 1. Get job details to retrieve escrow address
-    const { job } = await api.getJob(params.job_id);
+    // 1. Release escrow via backend — it handles deploy/deliver/confirm/retries
+    await api.confirmEscrow(params.job_id);
 
-    if (!job.escrow_address) {
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Job ${params.job_id} has no escrow address. Cannot release funds.`,
-        }],
-        isError: true,
-      };
-    }
-
-    // 2. Release escrow on TON blockchain
+    // 2. Confirm the job in the backend
     try {
-      await confirmEscrow(job.escrow_address, params.job_id);
-    } catch (tonError: any) {
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Failed to release escrow on-chain: ${tonError.message}. The job delivery is recorded but payment was not released.`,
-        }],
-        isError: true,
-      };
-    }
+      await api.confirmJob(params.job_id);
+    } catch { /* /escrow/confirm already set status to completed */ }
 
-    // 3. Confirm the job in the backend
-    await api.confirmJob(params.job_id);
-
-    // 4. Submit rating
+    // 3. Submit rating
     await api.rateJob(params.job_id, params.rating);
 
     return {
@@ -57,7 +35,7 @@ export async function batonRate(params: BatonRateParams) {
     return {
       content: [{
         type: 'text' as const,
-        text: `Failed to rate: ${error.message}`,
+        text: `Failed to rate and pay: ${error.message}`,
       }],
       isError: true,
     };

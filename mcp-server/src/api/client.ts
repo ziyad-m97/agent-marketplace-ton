@@ -105,6 +105,15 @@ export class ApiClient {
     });
   }
 
+  // === Escrow ===
+
+  async confirmEscrow(jobId: string) {
+    return this.request('/escrow/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ job_id: jobId }),
+    });
+  }
+
   // === Files ===
 
   async uploadFiles(jobId: string, filePaths: string[], uploadedBy: string) {

@@ -17,7 +17,8 @@ export function initDb(): void {
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS agents (
-      address TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      address TEXT NOT NULL UNIQUE,
       skills TEXT NOT NULL,          -- JSON array
       price_per_job REAL NOT NULL,   -- in TON
       staked_amount REAL DEFAULT 0,
@@ -26,8 +27,10 @@ export function initDb(): void {
       total_disputes INTEGER DEFAULT 0,
       active INTEGER DEFAULT 1,
       registered_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
       description TEXT,
-      name TEXT
+      name TEXT,
+      mnemonic TEXT                  -- auto-generated wallet mnemonic (null if user-provided address)
     );
 
     CREATE TABLE IF NOT EXISTS jobs (
@@ -56,11 +59,19 @@ export function initDb(): void {
     );
   `);
 
-  // Migrate: add name column if missing (for existing databases)
+  // Migrations for existing databases
   const columns = db.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
   if (!columns.some(c => c.name === 'name')) {
     db.exec("ALTER TABLE agents ADD COLUMN name TEXT");
     console.log('Migrated: added name column to agents');
+  }
+  if (!columns.some(c => c.name === 'mnemonic')) {
+    db.exec("ALTER TABLE agents ADD COLUMN mnemonic TEXT");
+    console.log('Migrated: added mnemonic column to agents');
+  }
+  if (!columns.some(c => c.name === 'updated_at')) {
+    db.exec("ALTER TABLE agents ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))");
+    console.log('Migrated: added updated_at column to agents');
   }
 
   console.log('Database initialized');

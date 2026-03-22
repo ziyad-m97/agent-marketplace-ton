@@ -7,6 +7,7 @@ import {
   deliverOnChainWithSender,
   getEscrowStatus,
   disputeEscrow,
+  sleep,
 } from '../ton/escrow';
 
 export const escrowRouter = Router();
@@ -49,12 +50,13 @@ escrowRouter.post('/deploy', async (req, res) => {
   }
 });
 
-// Worker delivers on-chain
+// Worker delivers on-chain (with retries)
 escrowRouter.post('/deliver', async (req, res) => {
   const { job_id, worker_mnemonic } = req.body;
 
-  if (!job_id || !worker_mnemonic) {
-    return res.status(400).json({ error: 'job_id and worker_mnemonic required' });
+  const mnemonic = worker_mnemonic || process.env.WORKER_MNEMONIC;
+  if (!job_id || !mnemonic) {
+    return res.status(400).json({ error: 'job_id and worker_mnemonic (or WORKER_MNEMONIC env) required' });
   }
 
   const db = getDb();
@@ -64,17 +66,24 @@ escrowRouter.post('/deliver', async (req, res) => {
     return res.status(400).json({ error: 'No escrow deployed for this job' });
   }
 
-  try {
-    const { sender } = await getSenderFromMnemonic(worker_mnemonic);
-    await deliverOnChainWithSender(job.escrow_address, job_id, sender);
-    res.json({ status: 'delivered_onchain' });
-  } catch (err: any) {
-    console.error(`[escrow] Deliver failed for job ${job_id}:`, err.message);
-    res.status(500).json({ error: `On-chain delivery failed: ${err.message}` });
+  const { sender } = await getSenderFromMnemonic(mnemonic);
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await deliverOnChainWithSender(job.escrow_address, job_id, sender);
+      return res.json({ status: 'delivered_onchain' });
+    } catch (err: any) {
+      console.error(`[escrow] Deliver attempt ${attempt} failed for job ${job_id}:`, err.message);
+      if (attempt === 3) {
+        return res.status(500).json({ error: `On-chain delivery failed after 3 attempts: ${err.message}` });
+      }
+      await sleep(3000);
+    }
   }
 });
 
-// Hirer confirms — releases TON to worker
+// Hirer confirms — BULLETPROOF: handles deploy, deliver, confirm, retries
+// This endpoint guarantees the specialist gets paid or returns a clear error.
 escrowRouter.post('/confirm', async (req, res) => {
   const { job_id } = req.body;
 
@@ -85,20 +94,104 @@ escrowRouter.post('/confirm', async (req, res) => {
   const db = getDb();
   const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job_id) as any;
   if (!job) return res.status(404).json({ error: 'Job not found' });
-  if (!job.escrow_address || job.escrow_address.startsWith('pending')) {
-    return res.status(400).json({ error: 'No escrow deployed for this job' });
+
+  let escrowAddress = job.escrow_address;
+
+  // ── Step 1: Ensure escrow is deployed ──
+  if (!escrowAddress || escrowAddress.startsWith('pending')) {
+    if (!job.worker_address || !job.amount) {
+      return res.status(400).json({ error: 'No escrow deployed and missing worker_address/amount to deploy one' });
+    }
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`[escrow] Catch-up deploy attempt ${attempt}/3 for job ${job_id}...`);
+        const result = await deployAndLockEscrow(job.worker_address, job_id, job.amount);
+        escrowAddress = result.escrowAddress;
+        db.prepare('UPDATE jobs SET escrow_address = ?, updated_at = datetime(\'now\') WHERE id = ?')
+          .run(escrowAddress, job_id);
+        console.log(`[escrow] Catch-up deploy succeeded: ${escrowAddress}`);
+        break;
+      } catch (deployErr: any) {
+        console.error(`[escrow] Catch-up deploy attempt ${attempt} failed:`, deployErr.message);
+        if (attempt === 3) {
+          return res.status(500).json({ error: `Escrow deploy failed after 3 attempts: ${deployErr.message}` });
+        }
+        await sleep(3000);
+      }
+    }
   }
 
+  // ── Step 2: Check on-chain status and fix any missing steps ──
   try {
-    await confirmEscrow(job.escrow_address, job_id);
+    const { status: onChainStatus } = await getEscrowStatus(escrowAddress);
+    console.log(`[escrow] On-chain status for job ${job_id}: ${onChainStatus}`);
 
-    db.prepare('UPDATE jobs SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
-      .run('completed', job_id);
+    // Already completed — nothing to do
+    if (onChainStatus === 2n) {
+      db.prepare('UPDATE jobs SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run('completed', job_id);
+      return res.json({ status: 'confirmed', escrow_address: escrowAddress, note: 'already completed on-chain' });
+    }
 
-    res.json({ status: 'confirmed', escrow_address: job.escrow_address });
-  } catch (err: any) {
-    console.error(`[escrow] Confirm failed for job ${job_id}:`, err.message);
-    res.status(500).json({ error: `On-chain confirm failed: ${err.message}` });
+    // Status 0 = created → worker never delivered on-chain. Do it now.
+    if (onChainStatus === 0n) {
+      // Try: 1) agent mnemonic from DB, 2) WORKER_MNEMONIC env var
+      const agent = db.prepare('SELECT mnemonic FROM agents WHERE address = ?').get(job.worker_address) as any;
+      const workerMnemonic = agent?.mnemonic || process.env.WORKER_MNEMONIC;
+      if (!workerMnemonic) {
+        return res.status(500).json({ error: 'Escrow on-chain status is 0 (not delivered). No worker mnemonic available to catch-up deliver.' });
+      }
+      console.log(`[escrow] Catch-up on-chain delivery for job ${job_id}...`);
+      const { sender: workerSender } = await getSenderFromMnemonic(workerMnemonic);
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await deliverOnChainWithSender(escrowAddress, job_id, workerSender);
+          console.log(`[escrow] Catch-up delivery succeeded for job ${job_id}`);
+          break;
+        } catch (deliverErr: any) {
+          console.error(`[escrow] Catch-up deliver attempt ${attempt} failed:`, deliverErr.message);
+          if (attempt === 3) {
+            return res.status(500).json({ error: `On-chain delivery failed after 3 attempts: ${deliverErr.message}` });
+          }
+          await sleep(3000);
+        }
+      }
+    }
+
+    // Status 3 = disputed → cannot confirm
+    if (onChainStatus === 3n) {
+      return res.status(400).json({ error: 'Escrow is disputed on-chain, cannot confirm' });
+    }
+
+    // Status 4 = expired → already auto-released
+    if (onChainStatus === 4n) {
+      db.prepare('UPDATE jobs SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run('completed', job_id);
+      return res.json({ status: 'confirmed', escrow_address: escrowAddress, note: 'expired — auto-released to worker' });
+    }
+
+  } catch (statusErr: any) {
+    // If we can't read status, proceed with confirm anyway — the contract will reject if wrong state
+    console.log(`[escrow] Could not read on-chain status: ${statusErr.message} — proceeding with confirm`);
+  }
+
+  // ── Step 3: Confirm (release payment to worker) with retries ──
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await confirmEscrow(escrowAddress, job_id);
+
+      db.prepare('UPDATE jobs SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run('completed', job_id);
+
+      console.log(`[escrow] ✅ Payment released for job ${job_id}`);
+      return res.json({ status: 'confirmed', escrow_address: escrowAddress });
+    } catch (err: any) {
+      console.error(`[escrow] Confirm attempt ${attempt} failed for job ${job_id}:`, err.message);
+      if (attempt === 3) {
+        return res.status(500).json({ error: `On-chain confirm failed after 3 attempts: ${err.message}` });
+      }
+      await sleep(3000);
+    }
   }
 });
 

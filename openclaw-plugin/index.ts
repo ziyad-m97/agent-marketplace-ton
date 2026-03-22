@@ -253,18 +253,27 @@ export default function (api: any) {
           );
         }
 
-        // Deploy real escrow contract and lock TON on-chain
-        try {
-          await apiRequest("/escrow/deploy", {
-            method: "POST",
-            body: JSON.stringify({
-              job_id: jobId,
-              worker_address: specialist.address,
-              amount: specialist.price_per_job,
-            }),
-          });
-        } catch (escrowErr: any) {
-          console.log(`[baton] Escrow deploy failed: ${escrowErr.message} — job continues without on-chain escrow`);
+        // Deploy real escrow contract and lock TON on-chain (with retry)
+        let escrowDeployed = false;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            await apiRequest("/escrow/deploy", {
+              method: "POST",
+              body: JSON.stringify({
+                job_id: jobId,
+                worker_address: specialist.address,
+                amount: specialist.price_per_job,
+              }),
+            });
+            escrowDeployed = true;
+            break;
+          } catch (escrowErr: any) {
+            console.log(`[baton] Escrow deploy attempt ${attempt} failed: ${escrowErr.message}`);
+            if (attempt < 2) await new Promise(r => setTimeout(r, 3000));
+          }
+        }
+        if (!escrowDeployed) {
+          console.log(`[baton] ⚠️ Escrow deploy failed after 2 attempts — job ${jobId} continues with pending escrow. Payment will be retried at confirm time.`);
         }
 
         return {
@@ -396,25 +405,24 @@ export default function (api: any) {
     },
     async execute(_id: string, params: any) {
       try {
-        // Try to confirm escrow on-chain (releases TON to specialist)
+        // /escrow/confirm handles everything: deploy, deliver, confirm, retries
+        await apiRequest(`/escrow/confirm`, {
+          method: "POST",
+          body: JSON.stringify({ job_id: params.job_id }),
+        });
+
         try {
-          await apiRequest(`/escrow/confirm`, {
-            method: "POST",
-            body: JSON.stringify({ job_id: params.job_id }),
-          });
-        } catch (escrowErr: any) {
-          console.log(`[baton] On-chain confirm skipped: ${escrowErr.message}`);
-          try {
-            await apiRequest(`/jobs/${params.job_id}/confirm`, { method: "PATCH" });
-          } catch { /* already completed */ }
-        }
+          await apiRequest(`/jobs/${params.job_id}/confirm`, { method: "PATCH" });
+        } catch { /* already completed */ }
+
         await apiRequest(`/jobs/${params.job_id}/rate`, {
           method: "POST",
           body: JSON.stringify({ rating: params.rating }),
         });
-        return { content: [{ type: "text", text: "Done." }] };
+
+        return { content: [{ type: "text", text: `Done. ${params.rating}★ — Specialist paid on-chain.` }] };
       } catch (err: any) {
-        return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
+        return { content: [{ type: "text", text: `Payment failed: ${err.message}` }], isError: true };
       }
     },
   });
@@ -460,29 +468,30 @@ export default function (api: any) {
         if (jobId && rating >= 1 && rating <= 5) {
           try {
             await tgSend(botToken, chatId, `⏳ Releasing payment on-chain...`);
-            // Try to confirm escrow on-chain (releases TON to specialist)
+
+            // /escrow/confirm handles EVERYTHING: deploy, deliver, confirm, retries
+            // It only returns 200 if the specialist is actually paid on-chain
+            await apiRequest(`/escrow/confirm`, {
+              method: "POST",
+              body: JSON.stringify({ job_id: jobId }),
+            });
+
+            // Backend confirm + rate (confirm may already be done by /escrow/confirm)
             try {
-              await apiRequest(`/escrow/confirm`, {
-                method: "POST",
-                body: JSON.stringify({ job_id: jobId }),
-              });
-            } catch (escrowErr: any) {
-              console.log(`[baton] On-chain confirm skipped: ${escrowErr.message}`);
-              // Confirm job in backend if not already completed
-              try {
-                await apiRequest(`/jobs/${jobId}/confirm`, { method: "PATCH" });
-              } catch { /* already completed, that's fine */ }
-            }
+              await apiRequest(`/jobs/${jobId}/confirm`, { method: "PATCH" });
+            } catch { /* already completed */ }
+
             await apiRequest(`/jobs/${jobId}/rate`, {
               method: "POST",
               body: JSON.stringify({ rating }),
             });
+
             await tgSend(botToken, chatId,
-              `✅ ${rating}★ — Specialist paid.`,
+              `✅ ${rating}★ — Specialist paid on-chain.`,
               [[{ text: "💰 My Account", callback_data: "bw" }]]
             );
           } catch (err: any) {
-            await tgSend(botToken, chatId, `❌ ${err.message}`);
+            await tgSend(botToken, chatId, `❌ Payment failed: ${err.message}`);
           }
           return { handled: true };
         }

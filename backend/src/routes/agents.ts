@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
+import { mnemonicNew, mnemonicToWalletKey } from '@ton/crypto';
+import { WalletContractV4 } from '@ton/ton';
 
 export const agentsRouter = Router();
 
@@ -82,29 +84,55 @@ function scoreAgent(agent: any, queryTokens: string[]): number {
 // ===== ROUTES =====
 
 // Register a specialist
-agentsRouter.post('/register', (req: Request, res: Response) => {
-  const { address, skills, price_per_job, description, name } = req.body;
+// If no address provided, auto-generates a TON wallet
+// If address already exists, updates skills/description/price (upsert)
+agentsRouter.post('/register', async (req: Request, res: Response) => {
+  const { address: providedAddress, skills, price_per_job, description, name } = req.body;
 
-  if (!address || !skills || !price_per_job) {
-    res.status(400).json({ error: 'address, skills, and price_per_job are required' });
+  if (!skills || !price_per_job) {
+    res.status(400).json({ error: 'skills and price_per_job are required' });
     return;
   }
 
   const db = getDb();
 
   try {
-    db.prepare(`
-      INSERT INTO agents (address, skills, price_per_job, description, name)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(address) DO UPDATE SET
-        skills = excluded.skills,
-        price_per_job = excluded.price_per_job,
-        description = excluded.description,
-        name = excluded.name,
-        active = 1
-    `).run(address, JSON.stringify(skills), price_per_job, description || null, name || null);
+    let address = providedAddress;
+    let mnemonic: string | null = null;
 
-    res.json({ status: 'registered', address });
+    // Auto-generate wallet if no address provided
+    if (!address) {
+      const words = await mnemonicNew(24);
+      mnemonic = words.join(' ');
+      const keypair = await mnemonicToWalletKey(words);
+      const wallet = WalletContractV4.create({ workchain: 0, publicKey: keypair.publicKey });
+      address = wallet.address.toString();
+    }
+
+    // Upsert: update if address already exists
+    const existing = db.prepare('SELECT * FROM agents WHERE address = ?').get(address) as any;
+
+    if (existing) {
+      db.prepare(`
+        UPDATE agents SET skills = ?, price_per_job = ?, description = ?, name = ?, active = 1, updated_at = datetime('now')
+        WHERE address = ?
+      `).run(JSON.stringify(skills), price_per_job, description || null, name || null, address);
+
+      res.json({ status: 'updated', address });
+    } else {
+      db.prepare(`
+        INSERT INTO agents (address, skills, price_per_job, description, name, mnemonic)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(address, JSON.stringify(skills), price_per_job, description || null, name || null, mnemonic);
+
+      const result: any = { status: 'registered', address };
+      // Only return mnemonic on first registration (when auto-generated)
+      if (mnemonic) {
+        result.mnemonic = mnemonic;
+        result.note = 'Wallet auto-generated. Save this mnemonic — it will not be shown again.';
+      }
+      res.json(result);
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -168,10 +196,10 @@ agentsRouter.get('/', (req: Request, res: Response) => {
   res.json({ agents: parsed });
 });
 
-// Get specialist profile
-agentsRouter.get('/:address', (req: Request, res: Response) => {
+// Get specialist profile by id
+agentsRouter.get('/:id', (req: Request, res: Response) => {
   const db = getDb();
-  const agent = db.prepare('SELECT * FROM agents WHERE address = ?').get(req.params.address) as any;
+  const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id) as any;
 
   if (!agent) {
     res.status(404).json({ error: 'Agent not found' });
@@ -180,26 +208,32 @@ agentsRouter.get('/:address', (req: Request, res: Response) => {
 
   const earningsRow = db.prepare(
     "SELECT SUM(amount) as total_earnings FROM jobs WHERE worker_address = ? AND status IN ('delivered', 'completed')"
-  ).get(req.params.address) as any;
+  ).get(agent.address) as any;
 
   agent.total_earnings = earningsRow?.total_earnings || 0;
   agent.skills = JSON.parse(agent.skills);
   res.json({ agent });
 });
 
-// Unregister
-agentsRouter.delete('/:address', (req: Request, res: Response) => {
+// Unregister by id
+agentsRouter.delete('/:id', (req: Request, res: Response) => {
   const db = getDb();
+
+  const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id) as any;
+  if (!agent) {
+    res.status(404).json({ error: 'Agent not found' });
+    return;
+  }
 
   const activeJobs = db.prepare(
     "SELECT COUNT(*) as count FROM jobs WHERE worker_address = ? AND status IN ('created', 'accepted')"
-  ).get(req.params.address) as any;
+  ).get(agent.address) as any;
 
   if (activeJobs.count > 0) {
     res.status(400).json({ error: 'Cannot unregister with active jobs' });
     return;
   }
 
-  db.prepare('UPDATE agents SET active = 0 WHERE address = ?').run(req.params.address);
+  db.prepare('UPDATE agents SET active = 0 WHERE id = ?').run(req.params.id);
   res.json({ status: 'unregistered' });
 });

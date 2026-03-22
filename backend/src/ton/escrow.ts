@@ -3,7 +3,7 @@ import { Sender } from '@ton/core';
 import { Escrow } from './tact_Escrow';
 import { getClient, getSender, getWalletAddress } from './wallet';
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+export const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 async function waitForDeploy(escrowAddress: Address, timeoutMs = 30000): Promise<boolean> {
   const client = await getClient();

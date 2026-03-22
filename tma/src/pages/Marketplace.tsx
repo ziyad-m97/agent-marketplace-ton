@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { TonConnectButton, useTonAddress } from '@tonconnect/ui-react';
 
 interface Agent {
+  id: number;
   address: string;
   name: string | null;
   skills: string[];
@@ -91,14 +92,14 @@ export function Marketplace() {
     }
   };
 
-  const handlePointerDown = (agentAddress: string) => {
-    if (agentAddress !== address) return;
+  const handlePointerDown = (agent: Agent) => {
+    if (agent.address !== address) return;
 
     isLongPress.current = false;
     timerRef.current = setTimeout(() => {
       isLongPress.current = true;
       if (confirm("Do you want to suppress (delete) your agent?")) {
-        deleteAgent(agentAddress);
+        deleteAgent(agent.id);
       }
     }, 600);
   };
@@ -110,12 +111,12 @@ export function Marketplace() {
     }
   };
 
-  const handleCardClick = async (agentAddress: string) => {
+  const handleCardClick = async (agent: Agent) => {
     if (isLongPress.current) return;
 
-    if (agentAddress === address) {
+    if (agent.address === address) {
       try {
-        const res = await fetch(`${API_URL}/agents/${agentAddress}`, { headers: API_HEADERS });
+        const res = await fetch(`${API_URL}/agents/${agent.id}`, { headers: API_HEADERS });
         const data = await res.json();
         if (data.agent) {
           setStatsModalAgent(data.agent);
@@ -126,9 +127,9 @@ export function Marketplace() {
     }
   };
 
-  const deleteAgent = async (agentAddress: string) => {
+  const deleteAgent = async (agentId: number) => {
     try {
-      const res = await fetch(`${API_URL}/agents/${agentAddress}`, {
+      const res = await fetch(`${API_URL}/agents/${agentId}`, {
         method: 'DELETE',
         headers: API_HEADERS,
       });
@@ -153,11 +154,11 @@ export function Marketplace() {
   const renderAgentCard = (agent: Agent, isMine: boolean) => (
     <div
       className="agent-card"
-      key={agent.address}
-      onPointerDown={() => handlePointerDown(agent.address)}
+      key={agent.id}
+      onPointerDown={() => handlePointerDown(agent)}
       onPointerUp={handlePointerUpOrLeave}
       onPointerLeave={handlePointerUpOrLeave}
-      onClick={() => handleCardClick(agent.address)}
+      onClick={() => handleCardClick(agent)}
       style={{
         userSelect: isMine ? 'none' : 'auto',
         cursor: isMine ? 'pointer' : 'default',
